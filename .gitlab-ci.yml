@@ -23,13 +23,14 @@ cache:
     - venv/
 
 before_script:
-  - apt update && apt install -y clang python3-dev curl
+  - apt update && apt install -y python3-dev
   - pip install --upgrade pip
   - pip install virtualenv
   - virtualenv venv
   - source venv/bin/activate
   - pip install docutils
   - pip install --no-deps -r requirements.txt
+  - pip install z3-solver==4.8.13
 
 test:
   script:
