@@ -103,7 +103,7 @@ setup(
       "prometheus-client==0.11.0",
       "prompt-toolkit==3.0.20",
       "ptyprocess==0.7.0",
-      "py==1.10.0",
+      "py==1.11.0",
       "pyOpenSSL==21.0.0",
       "pycodestyle==2.7.0",
       "pycparser==2.20",
@@ -116,7 +116,7 @@ setup(
       "pytest-profiling==1.7.0",
       "pytest-pycharm==0.7.0",
       "pytest-xdist==2.4.0",
-      "pytest==6.2.4",
+      "pytest==6.2.5",
       "python-dateutil==2.8.2",
       "python-magic==0.4.24",
       "pytz==2021.3",
@@ -158,7 +158,9 @@ setup(
       "yapf==0.31.0",
       "z3-solver>=4.8.8.0",
       "zipp==3.6.0",
-      "proxyorderedset @ git+git://github.com/rindPHI/proxyorderedset@1a11f4289789d4fa5babe67560ad3be0e19c4790",
-      "grammargraph @ git+git://github.com/rindPHI/GrammarGraph@e65454ed0613c3b015d7996c1693bad34f3997a2"
+      "proxyorderedset @ git+https://github.com/rindPHI/proxyorderedset",
+      "grammargraph @ git+https://github.com/rindPHI/GrammarGraph",
+      "isla @ git+https://github.com/rindPHI/isla",
+      "grammar2regex @ git+https://github.com/rindPHI/grammar2regex"
     ],
 )
