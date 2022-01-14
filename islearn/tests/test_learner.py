@@ -80,7 +80,7 @@ class TestLearner(unittest.TestCase):
 
         result = filter_invariants([pattern], inputs, scriptsizec.SCRIPTSIZE_C_GRAMMAR)
 
-        print("\n\n".join(map(repr, result)))
+        print("\n\n".join(map(isla.unparse_isla, result)))
 
     def test_vacuous_satisfaction(self):
         grammar = scriptsizec.SCRIPTSIZE_C_GRAMMAR
