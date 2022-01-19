@@ -44,7 +44,13 @@ class TestLearner(unittest.TestCase):
 
         result = filter_invariants([abstract_formula], inputs, scriptsizec.SCRIPTSIZE_C_GRAMMAR)
 
-        print("\n\n".join(map(isla.unparse_isla, result)))
+        self.assertEqual(8, len(result))
+        for formula in result:
+            vars = {var.name: var for var in isla.VariablesCollector.collect(formula)}
+            self.assertIn(vars["use_ctx"].n_type, ["<expr>", "<test>", "<sum>", "<term>"])
+            self.assertEqual("<id>", vars["use"].n_type)
+            self.assertIn(vars["def_ctx"].n_type, ["<block_statement>", "<declaration>"])
+            self.assertEqual("<id>", vars["def"].n_type)
 
 
 if __name__ == '__main__':

@@ -5,17 +5,22 @@ from dataclasses import dataclass
 from typing import List, Tuple, Set, Dict, Optional, cast
 
 import z3
-from grammar_graph import gg
 from isla import isla
 from isla.helpers import is_z3_var
 from isla.isla_predicates import is_before, BEFORE_PREDICATE
-from isla.solver import get_quantifier_chains
 from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
-from islearn.pattern import Pattern, Placeholders
-
 logger = logging.getLogger("learner")
+
+
+class PlaceholderVariable(isla.BoundVariable, ABC):
+    pass
+
+
+@dataclass(frozen=True, init=True)
+class NonterminalPlaceholderVariable(PlaceholderVariable):
+    name: str
 
 
 def filter_invariants(
@@ -154,15 +159,6 @@ def split_cnf(formula: isla.Formula) -> Optional[List[isla.Formula]]:
     return None
 
 
-class PlaceholderVariable(isla.BoundVariable, ABC):
-    pass
-
-
-@dataclass(frozen=True, init=True)
-class NonterminalPlaceholderVariable(PlaceholderVariable):
-    name: str
-
-
 def get_placeholders(formula: isla.Formula) -> Set[NonterminalPlaceholderVariable]:
     placeholders = {var for var in isla.VariablesCollector.collect(formula)
                     if isinstance(var, PlaceholderVariable)}
@@ -190,27 +186,3 @@ def extract_top_level_constant(candidate):
     return next(
         (c for c in isla.VariablesCollector.collect(candidate)
          if isinstance(c, isla.Constant) and not c.is_numeric()))
-
-
-def check_vacuous_satisfaction(
-        formula: isla.Formula,
-        vacuously_matched_quantifiers: Set[isla.ForallFormula]) -> bool:
-    if not isla.get_toplevel_quantified_formulas(formula) or not vacuously_matched_quantifiers:
-        return False
-
-    # TODO: Deal with conjunctions / disjunctions and v.s. in only one part.
-    quantifier_chains: List[Tuple[isla.ForallFormula, ...]] = [
-        tuple([f for f in c if isinstance(f, isla.ForallFormula)])
-        for c in get_quantifier_chains(formula)]
-    quantifier_chains = [c for c in quantifier_chains if c]
-
-    vacuous_chains = {
-        c for c in quantifier_chains if
-        any(any(of.id == f.id for of in vacuously_matched_quantifiers)
-            for f in c)}
-
-    assert len(vacuous_chains) <= len(quantifier_chains)
-    if len(vacuous_chains) < len(quantifier_chains):
-        return False
-
-    return True
