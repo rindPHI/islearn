@@ -134,6 +134,7 @@ setup(
       "sortedcontainers==2.4.0",
       "soupsieve==2.3.1",
       "svglib==1.1.0",
+      "swiplserver==1.0.1",
       "tenacity==8.0.1",
       "terminado==0.12.1",
       "testpath==0.5.0",

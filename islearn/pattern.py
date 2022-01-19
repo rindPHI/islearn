@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Callable, Iterable, Union, Any, Dict, Optional
+from typing import Callable, Any, Dict, Optional
 
 from grammar_graph import gg
 from isla import isla
@@ -105,3 +105,5 @@ class Pattern:
 
     def __hash__(self) -> int:
         return hash((self.placeholders, self.precondition, self.formula_factory))
+
+
