@@ -29,88 +29,36 @@ def filter_invariants(
         grammar: Grammar) -> List[isla.Formula]:
     candidates: List[isla.Formula] = []
     for pattern in patterns:
-        constant: isla.Constant = extract_top_level_constant(pattern)
+        placeholders = sorted(list(get_placeholders(pattern)))
+        var_map: Dict[NonterminalPlaceholderVariable, str] = {
+            placeholder: placeholder.name.upper()
+            for placeholder in placeholders}
+
+        core = get_quantifier_free_core(pattern)
+        assert core is not None, "Only supporting formulas with one quantifier chain."
+
+        conjunctive_formulas = split_cnf(core)
+        assert conjunctive_formulas is not None, "Only supporting conjunctive quantifier-free core."
+
+        translators: Set[PrologTranslator] = {get_translator(formula) for formula in conjunctive_formulas}
+        translators = {translator for translator in translators if translator is not None}
 
         for inp in inputs:
             assumptions: List[str] = []
 
             assumptions.extend([f"inner_node({tree.id})" for _, tree in inp.paths() if tree.num_children() > 0])
-
-            stack: List[isla.DerivationTree] = [inp]
-            while stack:
-                node = stack.pop()
-                for child in node.children:
-                    stack.append(child)
-                    assumptions.append(f"in({child.id}, {node.id})")
-
-            ordered_trees: List[Tuple[isla.DerivationTree, isla.DerivationTree]] = [
-                (t1, t2) for (p1, t1), (p2, t2)
-                in itertools.product(*[[(path, tree) for path, tree in inp.paths()] for _ in range(2)])
-                if is_before(None, p1, p2)]
-
-            for t1, t2 in ordered_trees:
-                assumptions.append(f"before({t1.id}, {t2.id})")
-
-            equal_trees: List[Tuple[isla.DerivationTree, isla.DerivationTree]] = [
-                (t1, t2) for (p1, t1), (p2, t2)
-                in itertools.product(*[[(path, tree) for path, tree in inp.paths()] for _ in range(2)])
-                if str(t1) == str(t2)]
-
-            for t1, t2 in equal_trees:
-                assumptions.append(f"eq({t1.id}, {t2.id})")
-
-            assumptions.append("tin(A, B) :- in(A, B)")
-            assumptions.append("tin(A, C) :- in(A, B), tin(B, C)")
-
-            placeholders = sorted(list(get_placeholders(pattern)))
-            var_map: Dict[NonterminalPlaceholderVariable, str] = {
-                placeholder: placeholder.name.upper()
-                for placeholder in placeholders}
+            assumptions.extend(get_in_assumptions(inp))
+            for translator in translators:
+                assumptions.extend(translator.facts(inp))
 
             query = [f"inner_node({var})" for var in var_map.values()]
+            query.extend(get_in_query(pattern, inp.id, var_map))
 
-            class InVisitor(isla.FormulaVisitor):
-                def visit_exists_formula(self, formula: isla.ExistsFormula):
-                    self.handle(formula)
-
-                def visit_forall_formula(self, formula: isla.ForallFormula):
-                    self.handle(formula)
-
-                def handle(self, formula: isla.QuantifiedFormula):
-                    nonlocal query
-                    bv = cast(NonterminalPlaceholderVariable, formula.bound_variable)
-                    assert isinstance(bv, NonterminalPlaceholderVariable)
-                    if formula.in_variable == constant:
-                        iv = inp.id
-                    else:
-                        assert isinstance(formula.in_variable, NonterminalPlaceholderVariable)
-                        iv = var_map[formula.in_variable]
-
-                    query.append(f"tin({var_map[bv]}, {iv})")
-
-            pattern.accept(InVisitor())
-
-            core = get_quantifier_free_core(pattern)
-            assert core is not None, "Only supporting formulas with one quantifier chain."
-
-            conjunctive_formulas = split_cnf(core)
-            assert conjunctive_formulas is not None, "Only supporting conjunctive quantifier-free core."
-
-            for conjunct in conjunctive_formulas:
-                if isinstance(conjunct, isla.StructuralPredicateFormula) and conjunct.predicate == BEFORE_PREDICATE:
-                    arg_1 = conjunct.args[0]
-                    assert isinstance(arg_1, NonterminalPlaceholderVariable)
-                    arg_2 = conjunct.args[1]
-                    assert isinstance(arg_2, NonterminalPlaceholderVariable)
-                    query.append(f"before({var_map[arg_1]}, {var_map[arg_2]})")
-                elif isinstance(conjunct, isla.SMTFormula):
-                    inner: z3.BoolRef = conjunct.formula
-                    if inner.decl().kind() == z3.Z3_OP_EQ and all(is_z3_var(child) for child in inner.children()):
-                        free_vars: List[NonterminalPlaceholderVariable] = cast(
-                            List[NonterminalPlaceholderVariable], list(conjunct.free_variables()))
-                        assert len(free_vars) == 2
-                        assert all(isinstance(var, NonterminalPlaceholderVariable) for var in free_vars)
-                        query.append(f"eq({var_map[free_vars[0]]}, {var_map[free_vars[1]]})")
+            query.extend([
+                translator.query(conjunct, var_map)
+                for conjunct in conjunctive_formulas
+                for translator in translators
+                if translator.responsible(conjunct)])
 
             result = evaluate_prolog_query(assumptions, ", ".join(query))
             if result is None:
@@ -127,6 +75,52 @@ def filter_invariants(
         candidate for candidate in candidates
         if all(isla.evaluate(candidate, inp, grammar) for inp in inputs)
     ]
+
+
+def get_in_query(
+        formula: isla.Formula,
+        root_id: int,
+        var_map: Dict[NonterminalPlaceholderVariable, str]) -> List[str]:
+    query: List[str] = []
+    constant = extract_top_level_constant(formula)
+
+    class InVisitor(isla.FormulaVisitor):
+        def visit_exists_formula(self, formula: isla.ExistsFormula):
+            self.handle(formula)
+
+        def visit_forall_formula(self, formula: isla.ForallFormula):
+            self.handle(formula)
+
+        def handle(self, formula: isla.QuantifiedFormula):
+            nonlocal query
+            bv = cast(NonterminalPlaceholderVariable, formula.bound_variable)
+            assert isinstance(bv, NonterminalPlaceholderVariable)
+            if formula.in_variable == constant:
+                iv = root_id
+            else:
+                assert isinstance(formula.in_variable, NonterminalPlaceholderVariable)
+                iv = var_map[formula.in_variable]
+
+            query.append(f"tin({var_map[bv]}, {iv})")
+
+    formula.accept(InVisitor())
+
+    return query
+
+
+def get_in_assumptions(tree: isla.DerivationTree) -> List[str]:
+    result: List[str] = []
+    stack: List[isla.DerivationTree] = [tree]
+    while stack:
+        node = stack.pop()
+        for child in node.children:
+            stack.append(child)
+            result.append(f"in({child.id}, {node.id})")
+
+    result.append("tin(A, B) :- in(A, B)")
+    result.append("tin(A, C) :- in(A, B), tin(B, C)")
+
+    return result
 
 
 def evaluate_prolog_query(assumptions: List[str], query: str) -> Optional[List[Dict[str, int]]]:
@@ -186,3 +180,90 @@ def extract_top_level_constant(candidate):
     return next(
         (c for c in isla.VariablesCollector.collect(candidate)
          if isinstance(c, isla.Constant) and not c.is_numeric()))
+
+
+class PrologTranslator(ABC):
+    def responsible(self, formula: isla.Formula) -> bool:
+        raise NotImplementedError()
+
+    def query(self, formula: isla.Formula, var_map: Dict[NonterminalPlaceholderVariable, str]) -> str:
+        raise NotImplementedError()
+
+    def facts(self, tree: isla.DerivationTree) -> List[str]:
+        raise NotImplementedError()
+
+
+class BeforePredicateTranslator(PrologTranslator):
+    def responsible(self, formula: isla.Formula) -> bool:
+        return isinstance(formula, isla.StructuralPredicateFormula) and formula.predicate == BEFORE_PREDICATE
+
+    def query(
+            self,
+            formula: isla.StructuralPredicateFormula,
+            var_map: Dict[NonterminalPlaceholderVariable, str]) -> str:
+        assert self.responsible(formula)
+
+        arg_1 = formula.args[0]
+        assert isinstance(arg_1, NonterminalPlaceholderVariable)
+        arg_2 = formula.args[1]
+        assert isinstance(arg_2, NonterminalPlaceholderVariable)
+        return f"before({var_map[arg_1]}, {var_map[arg_2]})"
+
+    def facts(self, tree: isla.DerivationTree) -> List[str]:
+        ordered_trees: List[Tuple[isla.DerivationTree, isla.DerivationTree]] = [
+            (t1, t2) for (p1, t1), (p2, t2)
+            in itertools.product(*[[(path, tree) for path, tree in tree.paths()] for _ in range(2)])
+            if is_before(None, p1, p2)]
+
+        result: List[str] = []
+        for t1, t2 in ordered_trees:
+            result.append(f"before({t1.id}, {t2.id})")
+
+        return result
+
+    def __hash__(self):
+        return 0
+
+    def __eq__(self, other):
+        return isinstance(other, BeforePredicateTranslator)
+
+
+class VariablesEqualTranslator(PrologTranslator):
+    def responsible(self, formula: isla.Formula) -> bool:
+        return (isinstance(formula, isla.SMTFormula) and
+                formula.formula.decl().kind() == z3.Z3_OP_EQ and
+                all(is_z3_var(child) for child in formula.formula.children()))
+
+    def query(self, formula: isla.SMTFormula, var_map: Dict[NonterminalPlaceholderVariable, str]) -> str:
+        assert self.responsible(formula)
+
+        free_vars: List[NonterminalPlaceholderVariable] = cast(
+            List[NonterminalPlaceholderVariable], list(formula.free_variables()))
+        assert len(free_vars) == 2
+        assert all(isinstance(var, NonterminalPlaceholderVariable) for var in free_vars)
+
+        return f"eq({var_map[free_vars[0]]}, {var_map[free_vars[1]]})"
+
+    def facts(self, tree: isla.DerivationTree) -> List[str]:
+        equal_trees: List[Tuple[isla.DerivationTree, isla.DerivationTree]] = [
+            (t1, t2) for (p1, t1), (p2, t2)
+            in itertools.product(*[[(path, tree) for path, tree in tree.paths()] for _ in range(2)])
+            if str(t1) == str(t2)]
+
+        return [f"eq({t1.id}, {t2.id})" for t1, t2 in equal_trees]
+
+    def __hash__(self):
+        return 0
+
+    def __eq__(self, other):
+        return isinstance(other, VariablesEqualTranslator)
+
+
+def get_translator(formula: isla.Formula) -> Optional[PrologTranslator]:
+    translators = [BeforePredicateTranslator(), VariablesEqualTranslator()]
+
+    try:
+        return next(translator for translator in translators
+                    if translator.responsible(formula))
+    except StopIteration:
+        return None
