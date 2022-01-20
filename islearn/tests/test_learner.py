@@ -5,8 +5,8 @@ import z3
 from fuzzingbook.Parser import EarleyParser
 from isla import isla, isla_shortcuts as sc
 
-from islearn.learner import filter_invariants, NonterminalPlaceholderVariable
-from islearn.tests.subject_languages import scriptsizec
+from islearn.learner import filter_invariants, NonterminalPlaceholderVariable, NonterminalStringPlaceholderVariable
+from islearn.tests.subject_languages import scriptsizec, csv
 
 
 class TestLearner(unittest.TestCase):
@@ -43,6 +43,7 @@ class TestLearner(unittest.TestCase):
             for inp in raw_inputs]
 
         result = filter_invariants([abstract_formula], inputs, scriptsizec.SCRIPTSIZE_C_GRAMMAR)
+        print("\n\n".join(map(isla.unparse_isla, result)))
 
         self.assertEqual(8, len(result))
         for formula in result:
@@ -51,6 +52,41 @@ class TestLearner(unittest.TestCase):
             self.assertEqual("<id>", vars["use"].n_type)
             self.assertIn(vars["def_ctx"].n_type, ["<block_statement>", "<declaration>"])
             self.assertEqual("<id>", vars["def"].n_type)
+
+    def test_filter_invariants_csv_colno(self):
+        start = isla.Constant("start", "<start>")
+        elem = NonterminalPlaceholderVariable("elem")
+        num = isla.BoundVariable("num", isla.Constant.NUMERIC_NTYPE)
+        needle_placeholder = NonterminalStringPlaceholderVariable("needle")
+
+        abstract_formula = isla.IntroduceNumericConstantFormula(
+            num,
+            sc.forall(
+                elem,
+                start,
+                sc.count({}, elem, needle_placeholder, num)
+            )
+        )
+
+        raw_inputs = [
+            """1a;\"2   a\";3
+4;5;6
+""",
+            """1;2
+""",
+            """1
+2
+""",
+        ]
+
+        inputs = [
+            isla.DerivationTree.from_parse_tree(
+                next(EarleyParser(csv.CSV_GRAMMAR).parse(inp)))
+            for inp in raw_inputs]
+
+        result = filter_invariants([abstract_formula], inputs, csv.CSV_GRAMMAR)
+        print(len(result))
+        print("\n".join(map(isla.unparse_isla, result)))
 
 
 if __name__ == '__main__':

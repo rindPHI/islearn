@@ -7,7 +7,7 @@ from typing import List, Tuple, Set, Dict, Optional, cast
 import z3
 from isla import isla
 from isla.helpers import is_z3_var
-from isla.isla_predicates import is_before, BEFORE_PREDICATE
+from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE
 from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
@@ -23,16 +23,20 @@ class NonterminalPlaceholderVariable(PlaceholderVariable):
     name: str
 
 
+@dataclass(frozen=True, init=True)
+class NonterminalStringPlaceholderVariable(PlaceholderVariable):
+    name: str
+
+
 def filter_invariants(
         patterns: List[isla.Formula],
         inputs: List[isla.DerivationTree],
         grammar: Grammar) -> List[isla.Formula]:
-    candidates: List[isla.Formula] = []
+    candidates: Set[isla.Formula] = set()
     for pattern in patterns:
-        placeholders = sorted(list(get_placeholders(pattern)))
-        var_map: Dict[NonterminalPlaceholderVariable, str] = {
+        var_map: Dict[PlaceholderVariable, str] = {
             placeholder: placeholder.name.upper()
-            for placeholder in placeholders}
+            for placeholder in get_placeholders(pattern)}
 
         core = get_quantifier_free_core(pattern)
         assert core is not None, "Only supporting formulas with one quantifier chain."
@@ -51,7 +55,8 @@ def filter_invariants(
             for translator in translators:
                 assumptions.extend(translator.facts(inp))
 
-            query = [f"inner_node({var})" for var in var_map.values()]
+            query = [f"inner_node({var})" for ph, var in var_map.items()
+                     if isinstance(ph, NonterminalPlaceholderVariable)]
             query.extend(get_in_query(pattern, inp.id, var_map))
 
             query.extend([
@@ -60,16 +65,29 @@ def filter_invariants(
                 for translator in translators
                 if translator.responsible(conjunct)])
 
+            if any(isinstance(var, NonterminalStringPlaceholderVariable) for var in var_map):
+                assumptions.extend([f"nonterminal(\"{nonterminal}\")" for nonterminal in grammar])
+                query.extend([f"nonterminal({var_map[var]})"
+                              for var in var_map
+                              if isinstance(var, NonterminalStringPlaceholderVariable)])
+
             result = evaluate_prolog_query(assumptions, ", ".join(query))
             if result is None:
                 continue
 
             for instantiation in result:
-                candidates.append(pattern.substitute_variables({
-                    placeholder: isla.BoundVariable(
-                        placeholder.name,
-                        inp.get_subtree(inp.find_node(instantiation[variable])).value)
-                    for placeholder, variable in var_map.items()}))
+                candidates.add(pattern.substitute_variables({
+                    placeholder:
+                        isla.BoundVariable(
+                            placeholder.name,
+                            inp.get_subtree(inp.find_node(instantiation[variable])).value)
+                    for placeholder, variable in var_map.items()
+                    if isinstance(placeholder, NonterminalPlaceholderVariable)
+                }).substitute_expressions({
+                    placeholder: instantiation[variable]
+                    for placeholder, variable in var_map.items()
+                    if isinstance(placeholder, NonterminalStringPlaceholderVariable)
+                }))
 
     return [
         candidate for candidate in candidates
@@ -80,7 +98,7 @@ def filter_invariants(
 def get_in_query(
         formula: isla.Formula,
         root_id: int,
-        var_map: Dict[NonterminalPlaceholderVariable, str]) -> List[str]:
+        var_map: Dict[PlaceholderVariable, str]) -> List[str]:
     query: List[str] = []
     constant = extract_top_level_constant(formula)
 
@@ -153,11 +171,12 @@ def split_cnf(formula: isla.Formula) -> Optional[List[isla.Formula]]:
     return None
 
 
-def get_placeholders(formula: isla.Formula) -> Set[NonterminalPlaceholderVariable]:
+def get_placeholders(formula: isla.Formula) -> Set[PlaceholderVariable]:
     placeholders = {var for var in isla.VariablesCollector.collect(formula)
                     if isinstance(var, PlaceholderVariable)}
-    assert all(isinstance(ph, NonterminalPlaceholderVariable) for ph in placeholders), \
-        "Only NonterminalPlaceholderVariables supported so far."
+    assert all(isinstance(ph, NonterminalPlaceholderVariable) or
+               isinstance(ph, NonterminalStringPlaceholderVariable) for ph in placeholders), \
+        "Only NonterminalPlaceholderVariables or NonterminalStringPlaceholderVariables supported so far."
     return placeholders
 
 
@@ -186,7 +205,7 @@ class PrologTranslator(ABC):
     def responsible(self, formula: isla.Formula) -> bool:
         raise NotImplementedError()
 
-    def query(self, formula: isla.Formula, var_map: Dict[NonterminalPlaceholderVariable, str]) -> str:
+    def query(self, formula: isla.Formula, var_map: Dict[PlaceholderVariable, str]) -> str:
         raise NotImplementedError()
 
     def facts(self, tree: isla.DerivationTree) -> List[str]:
@@ -200,7 +219,7 @@ class BeforePredicateTranslator(PrologTranslator):
     def query(
             self,
             formula: isla.StructuralPredicateFormula,
-            var_map: Dict[NonterminalPlaceholderVariable, str]) -> str:
+            var_map: Dict[PlaceholderVariable, str]) -> str:
         assert self.responsible(formula)
 
         arg_1 = formula.args[0]
@@ -234,7 +253,7 @@ class VariablesEqualTranslator(PrologTranslator):
                 formula.formula.decl().kind() == z3.Z3_OP_EQ and
                 all(is_z3_var(child) for child in formula.formula.children()))
 
-    def query(self, formula: isla.SMTFormula, var_map: Dict[NonterminalPlaceholderVariable, str]) -> str:
+    def query(self, formula: isla.SMTFormula, var_map: Dict[PlaceholderVariable, str]) -> str:
         assert self.responsible(formula)
 
         free_vars: List[NonterminalPlaceholderVariable] = cast(
@@ -259,8 +278,52 @@ class VariablesEqualTranslator(PrologTranslator):
         return isinstance(other, VariablesEqualTranslator)
 
 
+class CountPredicateTranslator(PrologTranslator):
+    def responsible(self, formula: isla.Formula) -> bool:
+        return isinstance(formula, isla.StructuralPredicateFormula) and formula.predicate == COUNT_PREDICATE
+
+    def query(
+            self,
+            formula: isla.StructuralPredicateFormula,
+            var_map: Dict[PlaceholderVariable, str]) -> str:
+        assert self.responsible(formula)
+
+        # TODO: Add query
+        raise NotImplementedError()
+
+    def facts(self, tree: isla.DerivationTree) -> List[str]:
+        # TODO: Add 0 occurrences for *reachable* nonterminals. Need to pass grammar to facts() for this.
+        result: List[str] = []
+
+        for _, subtree in tree.paths():
+            occurrences: Dict[str, int] = {}
+
+            def action(_: isla.Path, subsubtree: isla.DerivationTree):
+                nonlocal occurrences
+                if subsubtree.children:
+                    occurrences[subsubtree.value] = occurrences.get(subsubtree.value, 0) + 1
+
+            tree.traverse(action)
+
+            result.extend([
+                f'count({subtree.id}, "{nonterminal}", {occs})'
+                for nonterminal, occs in occurrences.items()])
+
+        return result
+
+    def __hash__(self):
+        return 0
+
+    def __eq__(self, other):
+        return isinstance(other, BeforePredicateTranslator)
+
+
 def get_translator(formula: isla.Formula) -> Optional[PrologTranslator]:
-    translators = [BeforePredicateTranslator(), VariablesEqualTranslator()]
+    translators = [
+        BeforePredicateTranslator(),
+        CountPredicateTranslator(),
+        VariablesEqualTranslator(),
+    ]
 
     try:
         return next(translator for translator in translators
