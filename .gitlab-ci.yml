@@ -30,13 +30,13 @@ before_script:
   - source venv/bin/activate
   - pip install docutils
   - pip install --no-deps -r requirements.txt
-  - pip install z3-solver==4.8.13
+  - pip install z3-solver==4.8.14
 
 test:
   script:
     #- python setup.py test
     - pip install tox
-    - tox -e py39
+    - tox -e py310
 
 run:
   script:
