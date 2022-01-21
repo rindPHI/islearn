@@ -98,9 +98,7 @@ class TestLearner(unittest.TestCase):
                 cast(isla.SemanticPredicateFormula, f).args[1]
                 for f in isla.FilterVisitor(lambda f: isinstance(f, isla.SemanticPredicateFormula)).collect(formula)}
             for needle in needle_values:
-                self.assertIn(needle, {
-                    "<csv-string-list>", "<raw-field>"
-                })
+                self.assertIn(needle, {"<csv-string-list>", "<raw-field>"})
 
 
 if __name__ == '__main__':
