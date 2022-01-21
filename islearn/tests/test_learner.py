@@ -69,13 +69,14 @@ class TestLearner(unittest.TestCase):
         )
 
         raw_inputs = [
-            """1a;\"2   a\";3
-4;5;6
+            """1a;\"2   a\";\" 12\"
+4; 55;6
+123;1;1
 """,
-            """1;2
+            """  1;2 
 """,
-            """1
-2
+            """1;3;17
+12;" 123";"  2"
 """,
         ]
 
@@ -87,6 +88,19 @@ class TestLearner(unittest.TestCase):
         result = filter_invariants([abstract_formula], inputs, csv.CSV_GRAMMAR)
         print(len(result))
         print("\n".join(map(isla.unparse_isla, result)))
+
+        self.assertEqual(2, len(result))
+        for formula in result:
+            vars = {var.name: var for var in isla.VariablesCollector.collect(formula)}
+            self.assertEqual(vars["elem"].n_type, "<csv-record>")
+
+            needle_values = {
+                cast(isla.SemanticPredicateFormula, f).args[1]
+                for f in isla.FilterVisitor(lambda f: isinstance(f, isla.SemanticPredicateFormula)).collect(formula)}
+            for needle in needle_values:
+                self.assertIn(needle, {
+                    "<csv-string-list>", "<raw-field>"
+                })
 
 
 if __name__ == '__main__':

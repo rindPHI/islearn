@@ -2,12 +2,14 @@ import itertools
 import logging
 from abc import ABC
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import List, Tuple, Set, Dict, Optional, cast
 
 import z3
+from grammar_graph import gg
 from isla import isla
-from isla.helpers import is_z3_var
-from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE
+from isla.helpers import is_z3_var, is_nonterminal
+from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE, reachable
 from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
@@ -44,7 +46,7 @@ def filter_invariants(
         conjunctive_formulas = split_cnf(core)
         assert conjunctive_formulas is not None, "Only supporting conjunctive quantifier-free core."
 
-        translators: Set[PrologTranslator] = {get_translator(formula) for formula in conjunctive_formulas}
+        translators: Set[PrologTranslator] = {get_translator(formula, grammar) for formula in conjunctive_formulas}
         translators = {translator for translator in translators if translator is not None}
 
         for inp in inputs:
@@ -241,7 +243,7 @@ class BeforePredicateTranslator(PrologTranslator):
         return result
 
     def __hash__(self):
-        return 0
+        return hash(type(self).__name__)
 
     def __eq__(self, other):
         return isinstance(other, BeforePredicateTranslator)
@@ -272,38 +274,74 @@ class VariablesEqualTranslator(PrologTranslator):
         return [f"eq({t1.id}, {t2.id})" for t1, t2 in equal_trees]
 
     def __hash__(self):
-        return 0
+        return hash(type(self).__name__)
 
     def __eq__(self, other):
         return isinstance(other, VariablesEqualTranslator)
 
 
 class CountPredicateTranslator(PrologTranslator):
+    def __init__(self, grammar: Grammar):
+        self.grammar = grammar
+        self.graph = gg.GrammarGraph.from_grammar(grammar)
+
+    def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
+        return reachable(self.graph, from_nonterminal, to_nonterminal)
+
     def responsible(self, formula: isla.Formula) -> bool:
-        return isinstance(formula, isla.StructuralPredicateFormula) and formula.predicate == COUNT_PREDICATE
+        return isinstance(formula, isla.SemanticPredicateFormula) and formula.predicate == COUNT_PREDICATE
 
     def query(
             self,
-            formula: isla.StructuralPredicateFormula,
+            formula: isla.SemanticPredicateFormula,
             var_map: Dict[PlaceholderVariable, str]) -> str:
         assert self.responsible(formula)
 
-        # TODO: Add query
-        raise NotImplementedError()
+        args = [
+            var_map[arg] if isinstance(arg, PlaceholderVariable) else
+            (f'"{arg}"' if isinstance(arg, str)
+             else "_")
+            for arg in formula.args]
+        return f'count({", ".join(args)})'
 
     def facts(self, tree: isla.DerivationTree) -> List[str]:
-        # TODO: Add 0 occurrences for *reachable* nonterminals. Need to pass grammar to facts() for this.
         result: List[str] = []
 
         for _, subtree in tree.paths():
+            if not subtree.children:
+                continue
+            assert is_nonterminal(subtree.value)
+
+            # Only consider subtrees with nonterminal symbols that can occur a variable amount
+            # of times in derivations form the grammar.
+            if all(not self.reachable(other_nonterminal, other_nonterminal) or
+                   not self.reachable(other_nonterminal, subtree.value)
+                   for other_nonterminal in self.grammar):
+                continue
+
             occurrences: Dict[str, int] = {}
+
+            for nonterminal in self.grammar:
+                # Consider only nonterminals that are reachable from this subtree.
+                if not self.reachable(subtree.value, nonterminal):
+                    continue
+
+                # Furthermore, consider only those which can occur different numbers of times in derivations from
+                # the subgrammar defined by the nonterminal of this subtree. This is the case if there is some
+                # recursive other nonterminal reachable form the nonterminal of this subtree, from which this
+                # nonterminal can be reached.
+                if any(self.reachable(subtree.value, other_nonterminal) and
+                       self.reachable(other_nonterminal, other_nonterminal) and
+                       self.reachable(other_nonterminal, nonterminal)
+                       for other_nonterminal in self.grammar):
+                    occurrences[nonterminal] = 0
 
             def action(_: isla.Path, subsubtree: isla.DerivationTree):
                 nonlocal occurrences
-                if subsubtree.children:
-                    occurrences[subsubtree.value] = occurrences.get(subsubtree.value, 0) + 1
+                if subsubtree.children and subsubtree.value in occurrences:
+                    occurrences[subsubtree.value] += 1
 
-            tree.traverse(action)
+            subtree.traverse(action)
 
             result.extend([
                 f'count({subtree.id}, "{nonterminal}", {occs})'
@@ -312,16 +350,16 @@ class CountPredicateTranslator(PrologTranslator):
         return result
 
     def __hash__(self):
-        return 0
+        return hash(type(self).__name__)
 
     def __eq__(self, other):
-        return isinstance(other, BeforePredicateTranslator)
+        return isinstance(other, CountPredicateTranslator)
 
 
-def get_translator(formula: isla.Formula) -> Optional[PrologTranslator]:
+def get_translator(formula: isla.Formula, grammar: Grammar) -> Optional[PrologTranslator]:
     translators = [
         BeforePredicateTranslator(),
-        CountPredicateTranslator(),
+        CountPredicateTranslator(grammar),
         VariablesEqualTranslator(),
     ]
 
