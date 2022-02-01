@@ -23,7 +23,8 @@ cache:
     - venv/
 
 before_script:
-  - apt update && apt install -y python3-dev swipl
+  - sudo apt-add-repository ppa:swi-prolog/stable
+  - apt update && apt install -y python3-dev swi-prolog
   - pip install --upgrade pip
   - pip install virtualenv
   - virtualenv venv
