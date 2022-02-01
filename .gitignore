@@ -3,3 +3,5 @@ venv/
 islearn/__pycache__/
 islearn/tests/__pycache__/
 islearn/tests/subject_languages/__pycache__/
+dist/
+src/islearn.egg-info/
