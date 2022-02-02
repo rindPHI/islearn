@@ -8,3 +8,8 @@ src/islearn.egg-info/
 .eggs/
 .tox/
 tests/__pycache__/
+.bash_history
+.cache/
+.local/
+src/islearn/__pycache__/
+src/islearn/isla_language/__pycache__/
