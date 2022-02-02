@@ -8,12 +8,12 @@ variables:
 before_script:
   - pip install --upgrade pip
   - pip install --upgrade wheel
-  - pip install --no-deps -r requirements.txt
-  - pip install z3-solver==4.8.14
+  - cat requirements.txt | grep -v z3 > requirements_noz3.txt
+  - pip install --no-deps -r requirements_noz3.txt
+  - pip install --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
 
 test:
   script:
-    - export PYTHONPATH=$PYTHONPATH:`pwd`
     - python3 -m pytest -n 16 --html=report.html --self-contained-html
 
 build:
