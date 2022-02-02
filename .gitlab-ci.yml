@@ -13,9 +13,8 @@ before_script:
 
 test:
   script:
+    - export PYTHONPATH=$PYTHONPATH:`pwd`
     - python3 -m pytest -n 16 --html=report.html --self-contained-html
-      #- pip install tox
-      #- tox -e py310
 
 build:
   script:
