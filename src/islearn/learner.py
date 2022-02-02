@@ -1,38 +1,32 @@
 import itertools
 import logging
 from abc import ABC
-from dataclasses import dataclass
 from typing import List, Tuple, Set, Dict, Optional, cast
 
 import z3
 from grammar_graph import gg
 from isla import language
+from isla.evaluator import evaluate
 from isla.helpers import is_z3_var, is_nonterminal
 from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE, reachable
 from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
+from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
+    parse_abstract_isla
+
 logger = logging.getLogger("learner")
 
 
-class PlaceholderVariable(language.BoundVariable, ABC):
-    pass
-
-
-@dataclass(frozen=True, init=True)
-class NonterminalPlaceholderVariable(PlaceholderVariable):
-    name: str
-
-
-@dataclass(frozen=True, init=True)
-class NonterminalStringPlaceholderVariable(PlaceholderVariable):
-    name: str
-
-
 def filter_invariants(
-        patterns: List[language.Formula],
+        patterns: List[language.Formula | str],
         inputs: List[language.DerivationTree],
         grammar: Grammar) -> List[language.Formula]:
+    patterns = [
+        pattern if isinstance(pattern, language.Formula)
+        else parse_abstract_isla(pattern, grammar)
+        for pattern in patterns]
+
     candidates: Set[language.Formula] = set()
     for pattern in patterns:
         var_map: Dict[PlaceholderVariable, str] = {
@@ -92,7 +86,7 @@ def filter_invariants(
 
     return [
         candidate for candidate in candidates
-        if all(language.evaluate(candidate, inp, grammar) for inp in inputs)
+        if all(evaluate(candidate, inp, grammar) for inp in inputs)
     ]
 
 

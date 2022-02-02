@@ -5,7 +5,7 @@
 
 # Official language image. Look for the different tagged releases at:
 # https://hub.docker.com/r/library/python/tags/
-image: ubuntu:impish
+image: python:3.10.2-alpine3.15
 
 # Change pip's cache directory to be inside the project directory since we can
 # only cache local items.
@@ -23,38 +23,26 @@ cache:
     - venv/
 
 before_script:
-  - apt update && apt install -y swi-prolog python3.10 python3.10-dev python3.10-venv z3
-  - pip install --upgrade pip
+  - echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
+  - apk update 
+  - apk add python3-dev git swi-prolog py3-scipy gcc g++ libgcc libquadmath gfortran libgfortran musl-dev make cmake libffi-dev lapack lapack-dev zlib zlib-dev jpeg jpeg-dev bash
+  - bash
   - pip install virtualenv
-  - virtualenv venv
+  - python3 -m venv venv
   - source venv/bin/activate
-  - pip install docutils
-  - pip install --no-deps -r requirements.txt
+  - pip install --upgrade pip
+  - pip install wheel
+  - pip install --no-deps --prefer-binary -r requirements.txt
   - pip install z3-solver==4.8.14
 
 test:
   script:
-    #- python setup.py test
     - pip install tox
     - tox -e py310
 
 run:
   script:
-    - python setup.py bdist_wheel
-    # an alternative approach is to install and run:
-    #- pip install dist/*
-    # run the command here
+    - python3 -m build
   artifacts:
     paths:
       - dist/*.whl
-
-#pages:
-#  script:
-#    - pip install sphinx sphinx-rtd-theme
-#    - cd doc ; make html
-#    - mv build/html/ ../public/
-#  artifacts:
-#    paths:
-#      - public
-#  rules:
-#    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
