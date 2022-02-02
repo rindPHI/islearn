@@ -10,10 +10,10 @@ before_script:
   - pip install --upgrade wheel
   - cat requirements.txt | grep -v z3 > requirements_noz3.txt
   - pip install --no-deps -r requirements_noz3.txt
-  - pip install --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
 
 test:
   script:
+    - pip install --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
     - python3 -m pytest -n 16 --html=report.html --self-contained-html
 
 build:
