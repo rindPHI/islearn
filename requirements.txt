@@ -86,6 +86,7 @@ pandoc-attributes==0.1.7
 pandocfilters==1.5.0
 parso==0.8.2
 pathos==0.2.8
+pep517==0.12.0
 pexpect==4.8.0
 pickleshare==0.7.5
 platformdirs==2.4.0
