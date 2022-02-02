@@ -1,13 +1,11 @@
 import unittest
 from typing import cast
 
-import z3
 from fuzzingbook.Parser import EarleyParser
-from isla import language, isla_shortcuts as sc
+from isla import language
 from isla_formalizations import scriptsizec, csv
 
 from islearn.learner import filter_invariants
-from islearn.language import NonterminalPlaceholderVariable, NonterminalStringPlaceholderVariable
 
 
 class TestLearner(unittest.TestCase):

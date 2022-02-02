@@ -12,6 +12,7 @@ from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE, r
 from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
+from islearn.helpers import e_assert_present
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
     parse_abstract_isla
 
@@ -28,27 +29,44 @@ def filter_invariants(
         for pattern in patterns]
 
     candidates: Set[language.Formula] = set()
-    for pattern in patterns:
-        var_map: Dict[PlaceholderVariable, str] = {
-            placeholder: placeholder.name.upper()
-            for placeholder in get_placeholders(pattern)}
 
-        core = get_quantifier_free_core(pattern)
-        assert core is not None, "Only supporting formulas with one quantifier chain."
+    for inp in inputs:
+        assumptions: Set[str] = set()
 
-        conjunctive_formulas = split_cnf(core)
-        assert conjunctive_formulas is not None, "Only supporting conjunctive quantifier-free core."
+        assumptions.update({f"inner_node({tree.id})" for _, tree in inp.paths() if tree.num_children() > 0})
+        assumptions.update(get_in_assumptions(inp))
 
-        translators: Set[PrologTranslator] = {get_translator(formula, grammar) for formula in conjunctive_formulas}
-        translators = {translator for translator in translators if translator is not None}
+        all_conjunctive_formulas: List[language.Formula] = [
+            f for pattern in patterns
+            for f in e_assert_present(
+                split_cnf(
+                    e_assert_present(
+                        get_quantifier_free_core(pattern),
+                        "Only supporting formulas with one quantifier chain.")),
+                "Only supporting conjunctive quantifier-free core.")
+        ]
 
-        for inp in inputs:
-            assumptions: List[str] = []
+        translators: Set[PrologTranslator] = set(
+            filter(
+                lambda e: e is not None,
+                [get_translator(formula, grammar)
+                 for formula in all_conjunctive_formulas]))
 
-            assumptions.extend([f"inner_node({tree.id})" for _, tree in inp.paths() if tree.num_children() > 0])
-            assumptions.extend(get_in_assumptions(inp))
-            for translator in translators:
-                assumptions.extend(translator.facts(inp))
+        for translator in translators:
+            assumptions.update(translator.facts(inp))
+
+        for pattern in patterns:
+            extended_assumptions: Set[str] = set(assumptions)
+            var_map: Dict[PlaceholderVariable, str] = {
+                placeholder: placeholder.name.upper()
+                for placeholder in get_placeholders(pattern)}
+
+            conjunctive_formulas = e_assert_present(
+                split_cnf(
+                    e_assert_present(
+                        get_quantifier_free_core(pattern),
+                        "Only supporting formulas with one quantifier chain.")),
+                "Only supporting conjunctive quantifier-free core.")
 
             query = [f"inner_node({var})" for ph, var in var_map.items()
                      if isinstance(ph, NonterminalPlaceholderVariable)]
@@ -61,12 +79,12 @@ def filter_invariants(
                 if translator.responsible(conjunct)])
 
             if any(isinstance(var, NonterminalStringPlaceholderVariable) for var in var_map):
-                assumptions.extend([f"nonterminal(\"{nonterminal}\")" for nonterminal in grammar])
+                extended_assumptions.update({f"nonterminal(\"{nonterminal}\")" for nonterminal in grammar})
                 query.extend([f"nonterminal({var_map[var]})"
                               for var in var_map
                               if isinstance(var, NonterminalStringPlaceholderVariable)])
 
-            result = evaluate_prolog_query(assumptions, ", ".join(query))
+            result = evaluate_prolog_query(extended_assumptions, ", ".join(query))
             if result is None:
                 continue
 
@@ -136,7 +154,7 @@ def get_in_assumptions(tree: language.DerivationTree) -> List[str]:
     return result
 
 
-def evaluate_prolog_query(assumptions: List[str], query: str) -> Optional[List[Dict[str, int]]]:
+def evaluate_prolog_query(assumptions: Set[str], query: str) -> Optional[List[Dict[str, int]]]:
     with PrologMQI() as mqi:
         with mqi.create_thread() as prolog_thread:
             for assumption in assumptions:
