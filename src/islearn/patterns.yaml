@@ -1,0 +1,14 @@
+- name: Def-Use
+  constraint: |
+      forall <?NONTERMINAL> use_ctx in start:
+        forall <?NONTERMINAL> use in use_ctx:
+          exists <?NONTERMINAL> def_ctx in start:
+            exists <?NONTERMINAL> def in def_ctx:
+              (before(def_ctx, use_ctx) and
+              (= def use))
+
+- name: Equal Count
+  constraint: |
+      exists int num:
+        forall <?NONTERMINAL> elem in start:
+          count(elem, <?NONTERMINAL>, num)

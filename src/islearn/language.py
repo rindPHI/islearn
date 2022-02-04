@@ -35,7 +35,7 @@ class NonterminalStringPlaceholderVariable(PlaceholderVariable):
 
 
 class AbstractVariableManager(VariableManager):
-    def __init__(self, grammar: Grammar):
+    def __init__(self, grammar: Optional[Grammar] = None):
         super().__init__(grammar)
 
     def _var(self,
@@ -43,7 +43,10 @@ class AbstractVariableManager(VariableManager):
              n_type: Optional[str],
              constr: Optional[Callable[[str, Optional[str]], Variable]] = None) -> Variable:
         if n_type is not None:
-            assert n_type == Variable.NUMERIC_NTYPE or n_type in self.grammar or n_type == NONTERMINAL_PLACEHOLDER, \
+            assert (self.grammar is None or
+                    n_type == Variable.NUMERIC_NTYPE or
+                    n_type in self.grammar or
+                    n_type == NONTERMINAL_PLACEHOLDER), \
                 f"Unknown nonterminal type {n_type} for variable {name}"
 
         try:
@@ -68,7 +71,7 @@ class AbstractVariableManager(VariableManager):
 class AbstractISLaEmitter(ISLaEmitter):
     def __init__(
             self,
-            grammar: Grammar,
+            grammar: Optional[Grammar] = None,
             structural_predicates: Set[StructuralPredicate] = STANDARD_STRUCTURAL_PREDICATES,
             semantic_predicates: Set[SemanticPredicate] = STANDARD_SEMANTIC_PREDICATES):
         super().__init__(grammar, structural_predicates, semantic_predicates)
@@ -95,7 +98,7 @@ class AbstractISLaEmitter(ISLaEmitter):
 
 def parse_abstract_isla(
         inp: str,
-        grammar: Grammar,
+        grammar: Optional[Grammar] = None,
         structural_predicates: Set[StructuralPredicate] = STANDARD_STRUCTURAL_PREDICATES,
         semantic_predicates: Set[SemanticPredicate] = STANDARD_SEMANTIC_PREDICATES) -> Formula:
     class BailPrintErrorStrategy(antlr4.BailErrorStrategy):

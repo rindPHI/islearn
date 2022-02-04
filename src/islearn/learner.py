@@ -1,8 +1,12 @@
+import io
 import itertools
 import logging
+import os.path
+import pkgutil
 from abc import ABC
-from typing import List, Tuple, Set, Dict, Optional, cast
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
 
+import isla.fuzzer
 import z3
 from grammar_graph import gg
 from isla import language
@@ -16,12 +20,71 @@ from islearn.helpers import e_assert_present
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
     parse_abstract_isla
 
+STANDARD_PATTERNS_REPO = "patterns.yaml"
 logger = logging.getLogger("learner")
 
 
+def learn_invariants(
+        grammar: Grammar,
+        prop: Callable[[language.DerivationTree], bool],
+        positive_examples: Optional[Iterable[language.DerivationTree]] = None,
+        negative_examples: Optional[Iterable[language.DerivationTree]] = None,
+        patterns: Optional[List[language.Formula | str]] = None,
+        pattern_file: Optional[str] = None,
+        activated_patterns: Optional[Iterable[str]] = None,
+        deactivated_patterns: Optional[Iterable[str]] = None) -> List[language.Formula]:
+    positive_examples = set(positive_examples or [])
+    negative_examples = set(negative_examples or [])
+
+    assert all(prop(example) for example in positive_examples)
+    assert all(not prop(example) for example in negative_examples)
+
+    if not patterns:
+        pattern_repo = patterns_from_file(pattern_file or STANDARD_PATTERNS_REPO)
+        if activated_patterns:
+            patterns = [pattern for name, pattern in pattern_repo.items() if name in activated_patterns]
+        elif deactivated_patterns:
+            patterns = [pattern for name, pattern in pattern_repo.items() if name not in deactivated_patterns]
+        else:
+            patterns = list(pattern_repo.values())
+    else:
+        patterns = [
+            pattern if isinstance(pattern, language.Formula)
+            else parse_abstract_isla(pattern, grammar)
+            for pattern in patterns]
+
+    # TODO: Also consider inverted patterns.
+
+    fuzzer = isla.fuzzer.GrammarCoverageFuzzer(grammar)
+    desired_number_examples = 10
+    num_tries = 100
+    if len(positive_examples) < desired_number_examples or len(negative_examples) < desired_number_examples:
+        i = 0
+        while ((len(positive_examples) < desired_number_examples
+                or len(negative_examples) < desired_number_examples)
+               and i < num_tries):
+            i += 1
+            inp = fuzzer.expand_tree(language.DerivationTree("<start>", None))
+            if prop(inp):
+                positive_examples.add(inp)
+            else:
+                negative_examples.add(inp)
+
+    invs_1 = filter_invariants(patterns, positive_examples, grammar)
+
+    invs_2 = [
+        inv for inv in invs_1
+        if not any(evaluate(inv, inp, grammar).is_true()
+                   for inp in negative_examples)]
+
+    # TODO: Learn invariants for negative samples, invert them?
+
+    return invs_2
+
+
 def filter_invariants(
-        patterns: List[language.Formula | str],
-        inputs: List[language.DerivationTree],
+        patterns: Iterable[language.Formula | str],
+        inputs: Iterable[language.DerivationTree],
         grammar: Grammar) -> List[language.Formula]:
     patterns = [
         pattern if isinstance(pattern, language.Formula)
@@ -379,3 +442,27 @@ def get_translator(formula: language.Formula, grammar: Grammar) -> Optional[Prol
                     if translator.responsible(formula))
     except StopIteration:
         return None
+
+
+def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> Dict[str, language.Formula]:
+    from yaml import load
+    try:
+        from yaml import CLoader as Loader
+    except ImportError:
+        from yaml import Loader
+
+    if os.path.isfile(file_name):
+        f = open(file_name, "r")
+        contents = f.read()
+        f.close()
+    else:
+        contents = pkgutil.get_data("islearn", STANDARD_PATTERNS_REPO).decode("UTF-8")
+
+    data = load(io.StringIO(contents), Loader=Loader)
+    assert isinstance(data, list)
+    assert len(data) > 0
+    assert all(isinstance(entry, dict) for entry in data)
+
+    return {
+        entry["name"]: parse_abstract_isla(entry["constraint"])
+        for entry in data}

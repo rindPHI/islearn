@@ -3,9 +3,12 @@ from typing import cast
 
 from fuzzingbook.Parser import EarleyParser
 from isla import language
+from isla.evaluator import evaluate
+from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
+from isla.language import parse_isla
 from isla_formalizations import scriptsizec, csv
 
-from islearn.learner import filter_invariants
+from islearn.learner import filter_invariants, patterns_from_file, learn_invariants
 
 
 class TestLearner(unittest.TestCase):
@@ -62,8 +65,6 @@ exists int num:
             for inp in raw_inputs]
 
         result = filter_invariants([pattern], inputs, csv.CSV_GRAMMAR)
-        print(len(result))
-        print("\n".join(map(language.unparse_isla, result)))
 
         self.assertEqual(2, len(result))
         for formula in result:
@@ -76,6 +77,46 @@ exists int num:
                 language.FilterVisitor(lambda f: isinstance(f, language.SemanticPredicateFormula)).collect(formula)}
             for needle in needle_values:
                 self.assertIn(needle, {"<csv-string-list>", "<raw-field>"})
+
+    def test_learn_invariants_simple_csv_colno(self):
+        correct_property = """
+exists int num:
+  forall <csv-record> elem in start:
+    count(elem, "<raw-field>", num)"""
+
+        def prop(tree: language.DerivationTree) -> bool:
+            return evaluate(correct_property, tree, csv.CSV_GRAMMAR).is_true()
+
+        result = learn_invariants(
+            csv.CSV_GRAMMAR,
+            prop,
+            activated_patterns={"Equal Count"},
+        )
+
+        # print(len(result))
+        # print("\n".join(map(language.unparse_isla, result)))
+
+        self.assertIn(
+            parse_isla(correct_property, csv.CSV_GRAMMAR, semantic_predicates=STANDARD_SEMANTIC_PREDICATES),
+            result)
+
+        self.assertEqual(2, len(result))
+        for formula in result:
+            vars = {var.name: var for var in language.VariablesCollector.collect(formula)}
+            self.assertEqual(vars["elem"].n_type, "<csv-record>")
+
+            needle_values = {
+                cast(language.SemanticPredicateFormula, f).args[1]
+                for f in
+                language.FilterVisitor(lambda f: isinstance(f, language.SemanticPredicateFormula)).collect(formula)}
+            for needle in needle_values:
+                self.assertIn(needle, {"<csv-string-list>", "<raw-field>"})
+
+    def test_load_patterns_from_file(self):
+        patterns = patterns_from_file()
+        self.assertTrue(patterns)
+        self.assertGreaterEqual(len(patterns), 2)
+        self.assertIn("Def-Use", patterns)
 
 
 if __name__ == '__main__':
