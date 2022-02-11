@@ -1,9 +1,14 @@
+import functools
 import io
+
+from isla.language import set_smt_auto_eval
+from isla.solver import ISLaSolver
+from pathos import multiprocessing as pmp
 import itertools
 import logging
 import os.path
 import pkgutil
-from abc import ABC
+from abc import ABC, ABCMeta
 from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
 
 import isla.fuzzer
@@ -11,14 +16,15 @@ import z3
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
-from isla.helpers import is_z3_var, is_nonterminal
+from isla.helpers import is_z3_var, is_nonterminal, z3_subst, dict_of_lists_to_list_of_dicts
 from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE, reachable
 from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
-from islearn.helpers import e_assert_present
+from islearn.helpers import e_assert_present, parallel_all, parallel_any, transitive_closure, mappings, \
+    connected_chains, non_consecutive_ordered_sub_sequences
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
-    parse_abstract_isla
+    parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
 logger = logging.getLogger("learner")
@@ -32,7 +38,7 @@ def learn_invariants(
         patterns: Optional[List[language.Formula | str]] = None,
         pattern_file: Optional[str] = None,
         activated_patterns: Optional[Iterable[str]] = None,
-        deactivated_patterns: Optional[Iterable[str]] = None) -> List[language.Formula]:
+        deactivated_patterns: Optional[Iterable[str]] = None) -> Dict[language.Formula, float]:
     positive_examples = set(positive_examples or [])
     negative_examples = set(negative_examples or [])
 
@@ -55,154 +61,443 @@ def learn_invariants(
 
     # TODO: Also consider inverted patterns.
 
+    ne_before = len(negative_examples)
+    pe_before = len(positive_examples)
+    generate_sample_inputs(grammar, prop, negative_examples, positive_examples)
+
+    logger.info(
+       "Generated %d additional positive, and %d additional negative samples (from scratch).",
+       len(positive_examples) - pe_before,
+       len(negative_examples) - ne_before
+    )
+
+    assert len(positive_examples) > 0, "Cannot learn without any positive examples!"
+
+    candidates = generate_candidates(patterns, positive_examples, grammar)
+    logger.info("Found %d invariant candidates", len(candidates))
+
+    # Only consider *real* invariants
+    invariants = [
+        candidate for candidate in candidates
+        if parallel_all(lambda inp: evaluate(candidate, inp, grammar).is_true(), positive_examples)
+    ]
+
+    logger.info("%d invariants remain after filtering", len(invariants))
+
+    # ne_before = len(negative_examples)
+    # negative_examples.update(generate_counter_examples_from_formulas(grammar, prop, invariants))
+    # logger.info(
+    #     "Generated %d additional negative samples (from invariants).",
+    #     len(negative_examples) - ne_before
+    # )
+
+    logger.info("Calculating precision")
+    result: Dict[language.Formula, float] = {}
+    for invariant in invariants:
+        with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+            num_counter_examples = sum(pool.map(
+                lambda negative_example: int(evaluate(invariant, negative_example, grammar).is_true()),
+                negative_examples))
+
+        result[invariant] = 1 - (num_counter_examples / (len(negative_examples) or 1))
+
+    return dict(cast(List[Tuple[language.Formula, float]],
+                     sorted(result.items(), key=lambda p: p[1], reverse=True)))
+
+
+def generate_sample_inputs(
+        grammar: Grammar,
+        prop: Callable[[language.DerivationTree], bool],
+        negative_examples: Set[language.DerivationTree],
+        positive_examples: Set[language.DerivationTree],
+        desired_number_examples: int = 10,
+        num_tries: int = 100) -> None:
     fuzzer = isla.fuzzer.GrammarCoverageFuzzer(grammar)
-    desired_number_examples = 10
-    num_tries = 100
     if len(positive_examples) < desired_number_examples or len(negative_examples) < desired_number_examples:
         i = 0
         while ((len(positive_examples) < desired_number_examples
                 or len(negative_examples) < desired_number_examples)
                and i < num_tries):
             i += 1
+
             inp = fuzzer.expand_tree(language.DerivationTree("<start>", None))
+
             if prop(inp):
                 positive_examples.add(inp)
             else:
                 negative_examples.add(inp)
 
-    invs_1 = filter_invariants(patterns, positive_examples, grammar)
 
-    invs_2 = [
-        inv for inv in invs_1
-        if not any(evaluate(inv, inp, grammar).is_true()
-                   for inp in negative_examples)]
+def generate_counter_examples_from_formulas(
+        grammar: Grammar,
+        prop: Callable[[language.DerivationTree], bool],
+        formulas: Iterable[language.Formula],
+        desired_number_counter_examples: int = 50,
+        num_tries: int = 100) -> Set[language.DerivationTree]:
+    result: Set[language.DerivationTree] = set()
 
-    # TODO: Learn invariants for negative samples, invert them?
+    solvers = {
+        formula: ISLaSolver(grammar, formula, enforce_unique_trees_in_queue=False).solve()
+        for formula in formulas}
 
-    return invs_2
+    i = 0
+    while len(result) < desired_number_counter_examples and i < num_tries:
+        # with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+        #     result.update({
+        #         inp
+        #         for inp in e_assert_present(pool.map(lambda f: next(solvers[f]), formulas))
+        #         if not prop(inp)
+        #     })
+        for formula in formulas:
+            for _ in range(desired_number_counter_examples):
+                inp = next(solvers[formula])
+                if not prop(inp):
+                    result.add(inp)
+
+        i += 1
+
+    return result
 
 
-def filter_invariants(
+def generate_candidates(
         patterns: Iterable[language.Formula | str],
         inputs: Iterable[language.DerivationTree],
-        grammar: Grammar) -> List[language.Formula]:
+        grammar: Grammar) -> Set[language.Formula]:
+    filters: List[PatternInstantiationFilter] = [
+        StructuralPredicatesFilter(),
+        # VariablesEqualFilter(),  # Seems to bring no benefit!
+    ]
+
     patterns = [
-        pattern if isinstance(pattern, language.Formula)
-        else parse_abstract_isla(pattern, grammar)
+        parse_abstract_isla(pattern, grammar) if isinstance(pattern, str)
+        else pattern
         for pattern in patterns]
 
+    result: Set[language.Formula] = set([])
+
+    nonterminal_paths: Set[Tuple[str, ...]] = {
+        tuple([inp.get_subtree(path[:idx]).value
+               for idx in range(len(path))])
+        for inp in inputs
+        for path, _ in inp.leaves()
+    }
+
+    nonterminal_chains: Set[Tuple[str, ...]] = {
+        tuple(reversed(path)) for path in nonterminal_paths
+        if not any(len(path_) > len(path) and path_[:len(path)] == path for path_ in nonterminal_paths)
+    }
+    assert all(chain[-1] == "<start>" for chain in nonterminal_chains)
+
+    for pattern in patterns:
+        logger.debug("Instantiating pattern\n%s", AbstractISLaUnparser(pattern).unparse())
+        set_smt_auto_eval(pattern, False)
+
+        in_visitor = InVisitor()
+        pattern.accept(in_visitor)
+
+        variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
+        assert all(chain[-1] == extract_top_level_constant(pattern) for chain in variable_chains)
+
+        instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
+        for variable_chain in variable_chains:
+            nonterminal_sequences: Set[Tuple[str, ...]] = {
+                sequence
+                for nonterminal_chain in nonterminal_chains
+                for sequence in non_consecutive_ordered_sub_sequences(nonterminal_chain[:-1], len(variable_chain) - 1)
+            }
+
+            new_instantiations = [
+                {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
+                 for idx, variable in enumerate(variable_chain[:-1])}
+                for nonterminal_sequence in nonterminal_sequences]
+
+            if not instantiations:
+                instantiations = new_instantiations
+            else:
+                instantiations = [
+                    cast(Dict[NonterminalPlaceholderVariable, language.BoundVariable],
+                         functools.reduce(dict.__or__, t))
+                    for t in list(itertools.product(instantiations, new_instantiations))
+                ]
+
+        pattern_insts_without_nonterminal_placeholders: Set[language.Formula] = {
+            pattern.substitute_variables(instantiation)
+            for instantiation in instantiations
+        }
+
+        logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
+                     len(pattern_insts_without_nonterminal_placeholders))
+
+        assert all(not get_placeholders(candidate) for candidate in pattern_insts_without_nonterminal_placeholders)
+
+        pattern_insts_meeting_atom_requirements: Set[language.Formula] = \
+            set(pattern_insts_without_nonterminal_placeholders)
+
+        for pattern_filter in filters:
+            pattern_insts_meeting_atom_requirements = {
+                pattern_inst for pattern_inst in pattern_insts_meeting_atom_requirements
+                if pattern_filter.predicate(pattern_inst, inputs)
+            }
+
+            logger.debug("%d instantiations remaining after filter '%s'",
+                         len(pattern_insts_meeting_atom_requirements),
+                         pattern_filter.name)
+
+        result.update(pattern_insts_meeting_atom_requirements)
+
+    return result
+
+
+class PatternInstantiationFilter(ABC):
+    def __init__(self, name: str):
+        self.name = name
+
+    def __eq__(self, other):
+        return isinstance(other, PatternInstantiationFilter) and self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+        raise NotImplementedError()
+
+
+class VariablesEqualFilter(PatternInstantiationFilter):
+    def __init__(self):
+        super().__init__("Variable Equality Filter")
+
+    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+        # We approximate satisfaction of constraints "var1 == var2" by checking whether there is
+        # at least one input with two equal subtrees of nonterminal types matching those of the
+        # variables.
+        smt_equality_formulas: List[language.SMTFormula] = cast(
+            List[language.SMTFormula],
+            language.FilterVisitor(
+                lambda f: (isinstance(f, language.SMTFormula) and
+                           z3.is_eq(f.formula) and
+                           len(f.free_variables()) == 2 and
+                           all(is_z3_var(child) for child in f.formula.children()))
+            ).collect(formula))
+
+        if not smt_equality_formulas:
+            return True
+
+        for inp in inputs:
+            success = True
+
+            for smt_equality_formula in smt_equality_formulas:
+                free_vars: List[NonterminalPlaceholderVariable] = cast(
+                    List[NonterminalPlaceholderVariable],
+                    list(smt_equality_formula.free_variables()))
+
+                if not any(
+                        t1.value == free_vars[0].n_type and
+                        t2.value == free_vars[1].n_type
+                        for (p1, t1), (p2, t2)
+                        in itertools.product(*[[(path, tree) for path, tree in inp.paths()] for _ in range(2)])
+                        if str(t1) == str(t2) and p1 != p2):
+                    success = False
+                    break
+
+            if success:
+                return True
+
+        return False
+
+
+class StructuralPredicatesFilter(PatternInstantiationFilter):
+    def __init__(self):
+        super().__init__("Structural Predicates Filter")
+
+    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+        # We approximate satisfaction of structural predicate formulas by searching
+        # inputs for subtrees with the right nonterminal types according to the argument
+        # types of the structural formulas.
+
+        structural_formulas: List[language.StructuralPredicateFormula] = cast(
+            List[language.StructuralPredicateFormula],
+            language.FilterVisitor(
+                lambda f: isinstance(f, language.StructuralPredicateFormula)).collect(formula))
+
+        if not structural_formulas:
+            return True
+
+        for inp in inputs:
+            success = True
+            for structural_formula in structural_formulas:
+                arg_insts: Dict[language.Variable, Set[language.DerivationTree]] = {}
+                for arg in structural_formula.free_variables():
+                    arg_insts[arg] = {t for _, t in inp.filter(lambda subtree: subtree.value == arg.n_type)}
+                arg_substitutions: List[Dict[language.Variable, language.DerivationTree]] = \
+                    dict_of_lists_to_list_of_dicts(arg_insts)
+
+                if not any(structural_formula.substitute_expressions(arg_substitution).evaluate(inp)
+                           for arg_substitution in arg_substitutions):
+                    success = False
+                    break
+
+            if success:
+                return True
+
+        return False
+
+
+def generate_candidates_prolog(
+        patterns: Iterable[str | language.Formula],
+        inputs: Iterable[language.DerivationTree],
+        grammar: Grammar) -> Set[language.Formula]:
+    patterns = [
+        parse_abstract_isla(pattern, grammar) if isinstance(pattern, str)
+        else pattern
+        for pattern in patterns]
+
+    var_map: Dict[PlaceholderVariable, str] = {
+        placeholder: placeholder.name.upper()
+        for pattern in patterns
+        for placeholder in get_placeholders(pattern)}
+
+    conjunctive_formulas: Dict[language.Formula, List[language.Formula]] = {
+        pattern: [
+            f for f in e_assert_present(
+                split_cnf(
+                    e_assert_present(
+                        get_quantifier_free_core(pattern),
+                        "Only supporting formulas with one quantifier chain.")),
+                "Only supporting conjunctive quantifier-free core.")]
+        for pattern in patterns
+    }
+
+    translators: Set[PrologTranslator] = set(
+        filter(
+            lambda e: e is not None,
+            [get_translator(formula, grammar)
+             for conjuncts in conjunctive_formulas.values()
+             for formula in conjuncts]))
+
     candidates: Set[language.Formula] = set()
+    inp: language.DerivationTree
+    pattern: language.Formula
+    for inp, pattern in itertools.product(inputs, patterns):
+        query = [f"inner_node({var})" for ph, var in var_map.items()
+                 if isinstance(ph, NonterminalPlaceholderVariable)]
+        query.extend(get_in_query(pattern, inp.id, var_map))
+        query.extend([
+            translator.query(conjunct, var_map)
+            for conjunct in conjunctive_formulas[pattern]
+            for translator in translators
+            if translator.responsible(conjunct)])
+        query.extend([f"nonterminal({var_map[var]})"
+                      for var in var_map
+                      if isinstance(var, NonterminalStringPlaceholderVariable)])
 
-    for inp in inputs:
-        assumptions: Set[str] = set()
+        result = evaluate_prolog_query(
+            generate_assumptions(grammar, inp, translators),
+            ", ".join(query))
 
-        assumptions.update({f"inner_node({tree.id})" for _, tree in inp.paths() if tree.num_children() > 0})
-        assumptions.update(get_in_assumptions(inp))
+        for instantiation in (result or []):
+            candidate = pattern.substitute_variables({
+                placeholder: language.BoundVariable(
+                    placeholder.name,
+                    inp.get_subtree(inp.find_node(instantiation[variable])).value)
+                for placeholder, variable in var_map.items()
+                if isinstance(placeholder, NonterminalPlaceholderVariable)})
 
-        all_conjunctive_formulas: List[language.Formula] = [
-            f for pattern in patterns
-            for f in e_assert_present(
-                split_cnf(
-                    e_assert_present(
-                        get_quantifier_free_core(pattern),
-                        "Only supporting formulas with one quantifier chain.")),
-                "Only supporting conjunctive quantifier-free core.")
-        ]
+            candidate = candidate.substitute_expressions({
+                placeholder: instantiation[variable]
+                for placeholder, variable in var_map.items()
+                if isinstance(placeholder, NonterminalStringPlaceholderVariable)
+            })
 
-        translators: Set[PrologTranslator] = set(
-            filter(
-                lambda e: e is not None,
-                [get_translator(formula, grammar)
-                 for formula in all_conjunctive_formulas]))
+            def substitute_string_placeholders(formula: language.Formula) -> language.Formula | bool:
+                if not isinstance(formula, language.SMTFormula):
+                    return False
 
-        for translator in translators:
-            assumptions.update(translator.facts(inp))
+                string_placeholders = [
+                    v for v in formula.free_variables()
+                    if isinstance(v, StringPlaceholderVariable)]
+                if not string_placeholders:
+                    return False
 
-        for pattern in patterns:
-            extended_assumptions: Set[str] = set(assumptions)
-            var_map: Dict[PlaceholderVariable, str] = {
-                placeholder: placeholder.name.upper()
-                for placeholder in get_placeholders(pattern)}
+                for ph in string_placeholders:
+                    string_inst = instantiation[var_map[ph]]
+                    assert isinstance(string_inst, str)
 
-            conjunctive_formulas = e_assert_present(
-                split_cnf(
-                    e_assert_present(
-                        get_quantifier_free_core(pattern),
-                        "Only supporting formulas with one quantifier chain.")),
-                "Only supporting conjunctive quantifier-free core.")
+                    return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
+                        ph.to_smt(): z3.StringVal(string_inst)
+                    })), *[v for v in formula.free_variables() if v not in string_placeholders])
 
-            query = [f"inner_node({var})" for ph, var in var_map.items()
-                     if isinstance(ph, NonterminalPlaceholderVariable)]
-            query.extend(get_in_query(pattern, inp.id, var_map))
+            candidate = language.replace_formula(candidate, substitute_string_placeholders)
 
-            query.extend([
-                translator.query(conjunct, var_map)
-                for conjunct in conjunctive_formulas
-                for translator in translators
-                if translator.responsible(conjunct)])
+            candidates.add(candidate)
 
-            if any(isinstance(var, NonterminalStringPlaceholderVariable) for var in var_map):
-                extended_assumptions.update({f"nonterminal(\"{nonterminal}\")" for nonterminal in grammar})
-                query.extend([f"nonterminal({var_map[var]})"
-                              for var in var_map
-                              if isinstance(var, NonterminalStringPlaceholderVariable)])
+    return candidates
 
-            result = evaluate_prolog_query(extended_assumptions, ", ".join(query))
-            if result is None:
-                continue
 
-            for instantiation in result:
-                candidates.add(pattern.substitute_variables({
-                    placeholder:
-                        language.BoundVariable(
-                            placeholder.name,
-                            inp.get_subtree(inp.find_node(instantiation[variable])).value)
-                    for placeholder, variable in var_map.items()
-                    if isinstance(placeholder, NonterminalPlaceholderVariable)
-                }).substitute_expressions({
-                    placeholder: instantiation[variable]
-                    for placeholder, variable in var_map.items()
-                    if isinstance(placeholder, NonterminalStringPlaceholderVariable)
-                }))
+class PrologTranslator(ABC):
+    def responsible(self, formula: language.Formula) -> bool:
+        raise NotImplementedError()
 
-    return [
-        candidate for candidate in candidates
-        if all(evaluate(candidate, inp, grammar) for inp in inputs)
-    ]
+    def query(self, formula: language.Formula, var_map: Dict[PlaceholderVariable, str]) -> str:
+        raise NotImplementedError()
+
+    def facts(self, tree: language.DerivationTree) -> Set[str]:
+        raise NotImplementedError()
+
+
+def generate_assumptions(
+        grammar: Grammar,
+        inp: language.DerivationTree,
+        translators: Iterable[PrologTranslator]) -> Set[str]:
+    assumptions: Set[str] = (
+            {f"inner_node({tree.id})" for _, tree in inp.paths() if tree.num_children() > 0}
+            | get_in_assumptions(inp)
+            | {f"nonterminal(\"{nonterminal}\")" for nonterminal in grammar})
+
+    for translator in translators:
+        assumptions |= translator.facts(inp)
+
+    return assumptions
+
+
+class InVisitor(language.FormulaVisitor):
+    def __init__(self):
+        self.result: Set[Tuple[language.Variable, language.Variable]] = set()
+
+    def visit_exists_formula(self, formula: language.ExistsFormula):
+        self.handle(formula)
+
+    def visit_forall_formula(self, formula: language.ForallFormula):
+        self.handle(formula)
+
+    def handle(self, formula: language.QuantifiedFormula):
+        self.result.add((formula.bound_variable, formula.in_variable))
 
 
 def get_in_query(
         formula: language.Formula,
         root_id: int,
         var_map: Dict[PlaceholderVariable, str]) -> List[str]:
-    query: List[str] = []
     constant = extract_top_level_constant(formula)
 
-    class InVisitor(language.FormulaVisitor):
-        def visit_exists_formula(self, formula: language.ExistsFormula):
-            self.handle(formula)
+    visitor = InVisitor()
+    formula.accept(visitor)
 
-        def visit_forall_formula(self, formula: language.ForallFormula):
-            self.handle(formula)
+    query: List[str] = []
+    for bound_variable, in_variable in visitor.result:
+        bv = cast(NonterminalPlaceholderVariable, bound_variable)
+        assert isinstance(bv, NonterminalPlaceholderVariable)
+        if in_variable == constant:
+            iv = root_id
+        else:
+            assert isinstance(in_variable, NonterminalPlaceholderVariable)
+            iv = var_map[in_variable]
 
-        def handle(self, formula: language.QuantifiedFormula):
-            nonlocal query
-            bv = cast(NonterminalPlaceholderVariable, formula.bound_variable)
-            assert isinstance(bv, NonterminalPlaceholderVariable)
-            if formula.in_variable == constant:
-                iv = root_id
-            else:
-                assert isinstance(formula.in_variable, NonterminalPlaceholderVariable)
-                iv = var_map[formula.in_variable]
-
-            query.append(f"tin({var_map[bv]}, {iv})")
-
-    formula.accept(InVisitor())
+        query.append(f"tin({var_map[bv]}, {iv})")
 
     return query
 
 
-def get_in_assumptions(tree: language.DerivationTree) -> List[str]:
+def get_in_assumptions(tree: language.DerivationTree) -> Set[str]:
     result: List[str] = []
     stack: List[language.DerivationTree] = [tree]
     while stack:
@@ -214,7 +509,7 @@ def get_in_assumptions(tree: language.DerivationTree) -> List[str]:
     result.append("tin(A, B) :- in(A, B)")
     result.append("tin(A, C) :- in(A, B), tin(B, C)")
 
-    return result
+    return set(result)
 
 
 def evaluate_prolog_query(assumptions: Set[str], query: str) -> Optional[List[Dict[str, int]]]:
@@ -250,9 +545,14 @@ def split_cnf(formula: language.Formula) -> Optional[List[language.Formula]]:
 def get_placeholders(formula: language.Formula) -> Set[PlaceholderVariable]:
     placeholders = {var for var in language.VariablesCollector.collect(formula)
                     if isinstance(var, PlaceholderVariable)}
-    assert all(isinstance(ph, NonterminalPlaceholderVariable) or
-               isinstance(ph, NonterminalStringPlaceholderVariable) for ph in placeholders), \
-        "Only NonterminalPlaceholderVariables or NonterminalStringPlaceholderVariables supported so far."
+    supported_placeholder_types = {
+        NonterminalPlaceholderVariable,
+        NonterminalStringPlaceholderVariable,
+        StringPlaceholderVariable}
+
+    assert all(any(isinstance(ph, t) for t in supported_placeholder_types) for ph in placeholders), \
+        "Only " + ", ".join(map(lambda t: t.__name__, supported_placeholder_types)) + " supported so far."
+
     return placeholders
 
 
@@ -277,17 +577,6 @@ def extract_top_level_constant(candidate):
          if isinstance(c, language.Constant) and not c.is_numeric()))
 
 
-class PrologTranslator(ABC):
-    def responsible(self, formula: language.Formula) -> bool:
-        raise NotImplementedError()
-
-    def query(self, formula: language.Formula, var_map: Dict[PlaceholderVariable, str]) -> str:
-        raise NotImplementedError()
-
-    def facts(self, tree: language.DerivationTree) -> List[str]:
-        raise NotImplementedError()
-
-
 class BeforePredicateTranslator(PrologTranslator):
     def responsible(self, formula: language.Formula) -> bool:
         return isinstance(formula, language.StructuralPredicateFormula) and formula.predicate == BEFORE_PREDICATE
@@ -304,7 +593,7 @@ class BeforePredicateTranslator(PrologTranslator):
         assert isinstance(arg_2, NonterminalPlaceholderVariable)
         return f"before({var_map[arg_1]}, {var_map[arg_2]})"
 
-    def facts(self, tree: language.DerivationTree) -> List[str]:
+    def facts(self, tree: language.DerivationTree) -> Set[str]:
         ordered_trees: List[Tuple[language.DerivationTree, language.DerivationTree]] = [
             (t1, t2) for (p1, t1), (p2, t2)
             in itertools.product(*[[(path, tree) for path, tree in tree.paths()] for _ in range(2)])
@@ -314,7 +603,7 @@ class BeforePredicateTranslator(PrologTranslator):
         for t1, t2 in ordered_trees:
             result.append(f"before({t1.id}, {t2.id})")
 
-        return result
+        return set(result)
 
     def __hash__(self):
         return hash(type(self).__name__)
@@ -327,6 +616,8 @@ class VariablesEqualTranslator(PrologTranslator):
     def responsible(self, formula: language.Formula) -> bool:
         return (isinstance(formula, language.SMTFormula) and
                 formula.formula.decl().kind() == z3.Z3_OP_EQ and
+                len(formula.free_variables()) == 2 and
+                all(isinstance(var, NonterminalPlaceholderVariable) for var in formula.free_variables()) and
                 all(is_z3_var(child) for child in formula.formula.children()))
 
     def query(self, formula: language.SMTFormula, var_map: Dict[PlaceholderVariable, str]) -> str:
@@ -334,24 +625,63 @@ class VariablesEqualTranslator(PrologTranslator):
 
         free_vars: List[NonterminalPlaceholderVariable] = cast(
             List[NonterminalPlaceholderVariable], list(formula.free_variables()))
-        assert len(free_vars) == 2
-        assert all(isinstance(var, NonterminalPlaceholderVariable) for var in free_vars)
 
-        return f"eq({var_map[free_vars[0]]}, {var_map[free_vars[1]]})"
+        return f"eqv({var_map[free_vars[0]]}, {var_map[free_vars[1]]})"
 
-    def facts(self, tree: language.DerivationTree) -> List[str]:
+    def facts(self, tree: language.DerivationTree) -> Set[str]:
         equal_trees: List[Tuple[language.DerivationTree, language.DerivationTree]] = [
             (t1, t2) for (p1, t1), (p2, t2)
             in itertools.product(*[[(path, tree) for path, tree in tree.paths()] for _ in range(2)])
             if str(t1) == str(t2)]
 
-        return [f"eq({t1.id}, {t2.id})" for t1, t2 in equal_trees]
+        return {f"eqv({t1.id}, {t2.id})" for t1, t2 in equal_trees}
 
     def __hash__(self):
         return hash(type(self).__name__)
 
     def __eq__(self, other):
         return isinstance(other, VariablesEqualTranslator)
+
+
+class VariableEqualsStringTranslator(PrologTranslator):
+    def responsible(self, formula: language.Formula) -> bool:
+        return (isinstance(formula, language.SMTFormula) and
+                formula.formula.decl().kind() == z3.Z3_OP_EQ and
+                len(formula.free_variables()) == 2 and
+                any(isinstance(fv, NonterminalPlaceholderVariable) for fv in formula.free_variables()) and
+                any(isinstance(fv, StringPlaceholderVariable) for fv in formula.free_variables()) and
+                all(is_z3_var(child) for child in formula.formula.children()))
+
+    def query(self, formula: language.SMTFormula, var_map: Dict[PlaceholderVariable, str]) -> str:
+        assert self.responsible(formula)
+
+        free_vars: List[PlaceholderVariable] = cast(
+            List[PlaceholderVariable], list(formula.free_variables()))
+
+        npv = next(v for v in free_vars if isinstance(v, NonterminalPlaceholderVariable))
+        spv = next(v for v in free_vars if isinstance(v, StringPlaceholderVariable))
+
+        return f"eqstr({var_map[npv]}, {var_map[spv]})"
+
+    def facts(self, tree: language.DerivationTree) -> Set[str]:
+        result: Set[str] = set()
+
+        for path, subtree in tree.paths():
+            # We aim to ignore substrings. Some can be eliminated by ignoring nodes
+            # which are children of a parent with the same type.
+            parents = [tree.get_subtree(path[:idx]) for idx in range(len(path))]
+            if any(parent.value == subtree.value for parent in parents):
+                continue
+
+            result.add(f'eqstr({subtree.id}, "' + str(subtree).replace('"', '""') + '")')
+
+        return result
+
+    def __hash__(self):
+        return hash(type(self).__name__)
+
+    def __eq__(self, other):
+        return isinstance(other, VariableEqualsStringTranslator)
 
 
 class CountPredicateTranslator(PrologTranslator):
@@ -378,7 +708,7 @@ class CountPredicateTranslator(PrologTranslator):
             for arg in formula.args]
         return f'count({", ".join(args)})'
 
-    def facts(self, tree: language.DerivationTree) -> List[str]:
+    def facts(self, tree: language.DerivationTree) -> Set[str]:
         result: List[str] = []
 
         for _, subtree in tree.paths():
@@ -421,7 +751,7 @@ class CountPredicateTranslator(PrologTranslator):
                 f'count({subtree.id}, "{nonterminal}", {occs})'
                 for nonterminal, occs in occurrences.items()])
 
-        return result
+        return set(result)
 
     def __hash__(self):
         return hash(type(self).__name__)
@@ -435,6 +765,7 @@ def get_translator(formula: language.Formula, grammar: Grammar) -> Optional[Prol
         BeforePredicateTranslator(),
         CountPredicateTranslator(grammar),
         VariablesEqualTranslator(),
+        VariableEqualsStringTranslator(),
     ]
 
     try:

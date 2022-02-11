@@ -31,10 +31,11 @@ sexpr:
   | ID                                                                              # SexprId
   | STRING                                                                          # SexprStr
   | '<?NONTERMINAL>'                                                                # SexprNonterminalStringPh
+  | '<?STRING>'                                                                     # SexprStringPh
   | '(' op=(ID | '=' | DIV | MUL | PLUS | MINUS | GEQ | LEQ | GT | LT)  sexpr + ')' # SepxrApp
   ;
 
-predicateArg: ID | INT | STRING | '<?NONTERMINAL>';
+predicateArg: ID | INT | STRING | '<?NONTERMINAL>' | '<?STRING>';
 
 STRING: '"' (ESC|.) *? '"';
 ID: ID_LETTER (ID_LETTER | DIGIT) * ;

@@ -7,8 +7,8 @@ import sys
 
 def serializedATN():
     with StringIO() as buf:
-        buf.write("\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3$")
-        buf.write("\u008b\4\2\t\2\4\3\t\3\4\4\t\4\4\5\t\5\4\6\t\6\4\7\t\7")
+        buf.write("\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3%")
+        buf.write("\u008c\4\2\t\2\4\3\t\3\4\4\t\4\4\5\t\5\4\6\t\6\4\7\t\7")
         buf.write("\3\2\5\2\20\n\2\3\2\3\2\3\3\3\3\3\3\3\3\3\3\3\3\3\4\3")
         buf.write("\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4")
         buf.write("\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3")
@@ -17,25 +17,25 @@ def serializedATN():
         buf.write("\n\4\f\4\16\4S\13\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\5\4\\")
         buf.write("\n\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3\4\3")
         buf.write("\4\3\4\3\4\7\4m\n\4\f\4\16\4p\13\4\3\5\3\5\3\5\3\5\5\5")
-        buf.write("v\n\5\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\6\6\u0081\n")
-        buf.write("\6\r\6\16\6\u0082\3\6\3\6\5\6\u0087\n\6\3\7\3\7\3\7\2")
-        buf.write("\3\6\b\2\4\6\b\n\f\2\4\5\2\t\t\30\30\33\"\4\2\24\24\27")
-        buf.write("\31\2\u009c\2\17\3\2\2\2\4\23\3\2\2\2\6[\3\2\2\2\bu\3")
-        buf.write("\2\2\2\n\u0086\3\2\2\2\f\u0088\3\2\2\2\16\20\5\4\3\2\17")
+        buf.write("v\n\5\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\6\6\u0082")
+        buf.write("\n\6\r\6\16\6\u0083\3\6\3\6\5\6\u0088\n\6\3\7\3\7\3\7")
+        buf.write("\2\3\6\b\2\4\6\b\n\f\2\4\5\2\t\t\31\31\34#\4\2\24\24\30")
+        buf.write("\32\2\u009e\2\17\3\2\2\2\4\23\3\2\2\2\6[\3\2\2\2\bu\3")
+        buf.write("\2\2\2\n\u0087\3\2\2\2\f\u0089\3\2\2\2\16\20\5\4\3\2\17")
         buf.write("\16\3\2\2\2\17\20\3\2\2\2\20\21\3\2\2\2\21\22\5\6\4\2")
-        buf.write("\22\3\3\2\2\2\23\24\7\3\2\2\24\25\7\30\2\2\25\26\7\4\2")
+        buf.write("\22\3\3\2\2\2\23\24\7\3\2\2\24\25\7\31\2\2\25\26\7\4\2")
         buf.write("\2\26\27\5\b\5\2\27\30\7\5\2\2\30\5\3\2\2\2\31\32\b\4")
-        buf.write("\1\2\32\33\7\6\2\2\33\34\5\b\5\2\34\35\7\30\2\2\35\36")
-        buf.write("\7\7\2\2\36\37\7\30\2\2\37 \7\4\2\2 !\5\6\4\21!\\\3\2")
-        buf.write("\2\2\"#\7\b\2\2#$\5\b\5\2$%\7\30\2\2%&\7\7\2\2&\'\7\30")
+        buf.write("\1\2\32\33\7\6\2\2\33\34\5\b\5\2\34\35\7\31\2\2\35\36")
+        buf.write("\7\7\2\2\36\37\7\31\2\2\37 \7\4\2\2 !\5\6\4\21!\\\3\2")
+        buf.write("\2\2\"#\7\b\2\2#$\5\b\5\2$%\7\31\2\2%&\7\7\2\2&\'\7\31")
         buf.write("\2\2\'(\7\4\2\2()\5\6\4\20)\\\3\2\2\2*+\7\6\2\2+,\5\b")
-        buf.write("\5\2,-\7\30\2\2-.\7\t\2\2./\7\27\2\2/\60\7\7\2\2\60\61")
-        buf.write("\7\30\2\2\61\62\7\4\2\2\62\63\5\6\4\17\63\\\3\2\2\2\64")
-        buf.write("\65\7\b\2\2\65\66\5\b\5\2\66\67\7\30\2\2\678\7\t\2\28")
-        buf.write("9\7\27\2\29:\7\7\2\2:;\7\30\2\2;<\7\4\2\2<=\5\6\4\16=")
-        buf.write("\\\3\2\2\2>?\7\b\2\2?@\7\n\2\2@A\7\30\2\2AB\7\4\2\2B\\")
-        buf.write("\5\6\4\rCD\7\6\2\2DE\7\n\2\2EF\7\30\2\2FG\7\4\2\2G\\\5")
-        buf.write("\6\4\fHI\7\13\2\2I\\\5\6\4\13JK\7\30\2\2KL\7\21\2\2LQ")
+        buf.write("\5\2,-\7\31\2\2-.\7\t\2\2./\7\30\2\2/\60\7\7\2\2\60\61")
+        buf.write("\7\31\2\2\61\62\7\4\2\2\62\63\5\6\4\17\63\\\3\2\2\2\64")
+        buf.write("\65\7\b\2\2\65\66\5\b\5\2\66\67\7\31\2\2\678\7\t\2\28")
+        buf.write("9\7\30\2\29:\7\7\2\2:;\7\31\2\2;<\7\4\2\2<=\5\6\4\16=")
+        buf.write("\\\3\2\2\2>?\7\b\2\2?@\7\n\2\2@A\7\31\2\2AB\7\4\2\2B\\")
+        buf.write("\5\6\4\rCD\7\6\2\2DE\7\n\2\2EF\7\31\2\2FG\7\4\2\2G\\\5")
+        buf.write("\6\4\fHI\7\13\2\2I\\\5\6\4\13JK\7\31\2\2KL\7\21\2\2LQ")
         buf.write("\5\f\7\2MN\7\22\2\2NP\5\f\7\2OM\3\2\2\2PS\3\2\2\2QO\3")
         buf.write("\2\2\2QR\3\2\2\2RT\3\2\2\2SQ\3\2\2\2TU\7\23\2\2U\\\3\2")
         buf.write("\2\2V\\\5\n\6\2WX\7\21\2\2XY\5\6\4\2YZ\7\23\2\2Z\\\3\2")
@@ -46,16 +46,17 @@ def serializedATN():
         buf.write("\f\7\2\2gh\7\17\2\2hm\5\6\4\bij\f\6\2\2jk\7\20\2\2km\5")
         buf.write("\6\4\7l]\3\2\2\2l`\3\2\2\2lc\3\2\2\2lf\3\2\2\2li\3\2\2")
         buf.write("\2mp\3\2\2\2nl\3\2\2\2no\3\2\2\2o\7\3\2\2\2pn\3\2\2\2")
-        buf.write("qr\7\"\2\2rs\7\30\2\2sv\7!\2\2tv\7\24\2\2uq\3\2\2\2ut")
-        buf.write("\3\2\2\2v\t\3\2\2\2w\u0087\7\25\2\2x\u0087\7\26\2\2y\u0087")
-        buf.write("\7\31\2\2z\u0087\7\30\2\2{\u0087\7\27\2\2|\u0087\7\24")
-        buf.write("\2\2}~\7\21\2\2~\u0080\t\2\2\2\177\u0081\5\n\6\2\u0080")
-        buf.write("\177\3\2\2\2\u0081\u0082\3\2\2\2\u0082\u0080\3\2\2\2\u0082")
-        buf.write("\u0083\3\2\2\2\u0083\u0084\3\2\2\2\u0084\u0085\7\23\2")
-        buf.write("\2\u0085\u0087\3\2\2\2\u0086w\3\2\2\2\u0086x\3\2\2\2\u0086")
-        buf.write("y\3\2\2\2\u0086z\3\2\2\2\u0086{\3\2\2\2\u0086|\3\2\2\2")
-        buf.write("\u0086}\3\2\2\2\u0087\13\3\2\2\2\u0088\u0089\t\3\2\2\u0089")
-        buf.write("\r\3\2\2\2\n\17Q[lnu\u0082\u0086")
+        buf.write("qr\7#\2\2rs\7\31\2\2sv\7\"\2\2tv\7\24\2\2uq\3\2\2\2ut")
+        buf.write("\3\2\2\2v\t\3\2\2\2w\u0088\7\25\2\2x\u0088\7\26\2\2y\u0088")
+        buf.write("\7\32\2\2z\u0088\7\31\2\2{\u0088\7\30\2\2|\u0088\7\24")
+        buf.write("\2\2}\u0088\7\27\2\2~\177\7\21\2\2\177\u0081\t\2\2\2\u0080")
+        buf.write("\u0082\5\n\6\2\u0081\u0080\3\2\2\2\u0082\u0083\3\2\2\2")
+        buf.write("\u0083\u0081\3\2\2\2\u0083\u0084\3\2\2\2\u0084\u0085\3")
+        buf.write("\2\2\2\u0085\u0086\7\23\2\2\u0086\u0088\3\2\2\2\u0087")
+        buf.write("w\3\2\2\2\u0087x\3\2\2\2\u0087y\3\2\2\2\u0087z\3\2\2\2")
+        buf.write("\u0087{\3\2\2\2\u0087|\3\2\2\2\u0087}\3\2\2\2\u0087~\3")
+        buf.write("\2\2\2\u0088\13\3\2\2\2\u0089\u008a\t\3\2\2\u008a\r\3")
+        buf.write("\2\2\2\n\17Q[lnu\u0083\u0087")
         return buf.getvalue()
 
 
@@ -72,18 +73,19 @@ class IslaLanguageParser ( Parser ):
     literalNames = [ "<INVALID>", "'const'", "':'", "';'", "'forall'", "'in'", 
                      "'exists'", "'='", "'int'", "'not'", "'and'", "'or'", 
                      "'xor'", "'implies'", "'iff'", "'('", "','", "')'", 
-                     "'<?NONTERMINAL>'", "'true'", "'false'", "<INVALID>", 
-                     "<INVALID>", "<INVALID>", "<INVALID>", "'/'", "'*'", 
-                     "'+'", "'-'", "'>='", "'<='", "'>'", "'<'" ]
+                     "'<?NONTERMINAL>'", "'true'", "'false'", "'<?STRING>'", 
+                     "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
+                     "'/'", "'*'", "'+'", "'-'", "'>='", "'<='", "'>'", 
+                     "'<'" ]
 
     symbolicNames = [ "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
-                      "<INVALID>", "STRING", "ID", "INT", "ESC", "DIV", 
-                      "MUL", "PLUS", "MINUS", "GEQ", "LEQ", "GT", "LT", 
-                      "WS", "LINE_COMMENT" ]
+                      "<INVALID>", "<INVALID>", "STRING", "ID", "INT", "ESC", 
+                      "DIV", "MUL", "PLUS", "MINUS", "GEQ", "LEQ", "GT", 
+                      "LT", "WS", "LINE_COMMENT" ]
 
     RULE_start = 0
     RULE_constDecl = 1
@@ -116,20 +118,21 @@ class IslaLanguageParser ( Parser ):
     T__17=18
     T__18=19
     T__19=20
-    STRING=21
-    ID=22
-    INT=23
-    ESC=24
-    DIV=25
-    MUL=26
-    PLUS=27
-    MINUS=28
-    GEQ=29
-    LEQ=30
-    GT=31
-    LT=32
-    WS=33
-    LINE_COMMENT=34
+    T__20=21
+    STRING=22
+    ID=23
+    INT=24
+    ESC=25
+    DIV=26
+    MUL=27
+    PLUS=28
+    MINUS=29
+    GEQ=30
+    LEQ=31
+    GT=32
+    LT=33
+    WS=34
+    LINE_COMMENT=35
 
     def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
         super().__init__(input, output)
@@ -1039,6 +1042,22 @@ class IslaLanguageParser ( Parser ):
                 listener.exitSexprTrue(self)
 
 
+    class SexprStringPhContext(SexprContext):
+
+        def __init__(self, parser, ctx:ParserRuleContext): # actually a IslaLanguageParser.SexprContext
+            super().__init__(parser)
+            self.copyFrom(ctx)
+
+
+        def enterRule(self, listener:ParseTreeListener):
+            if hasattr( listener, "enterSexprStringPh" ):
+                listener.enterSexprStringPh(self)
+
+        def exitRule(self, listener:ParseTreeListener):
+            if hasattr( listener, "exitSexprStringPh" ):
+                listener.exitSexprStringPh(self)
+
+
     class SexprFalseContext(SexprContext):
 
         def __init__(self, parser, ctx:ParserRuleContext): # actually a IslaLanguageParser.SexprContext
@@ -1121,7 +1140,7 @@ class IslaLanguageParser ( Parser ):
         self.enterRule(localctx, 8, self.RULE_sexpr)
         self._la = 0 # Token type
         try:
-            self.state = 132
+            self.state = 133
             self._errHandler.sync(self)
             token = self._input.LA(1)
             if token in [IslaLanguageParser.T__18]:
@@ -1160,12 +1179,18 @@ class IslaLanguageParser ( Parser ):
                 self.state = 122
                 self.match(IslaLanguageParser.T__17)
                 pass
-            elif token in [IslaLanguageParser.T__14]:
-                localctx = IslaLanguageParser.SepxrAppContext(self, localctx)
+            elif token in [IslaLanguageParser.T__20]:
+                localctx = IslaLanguageParser.SexprStringPhContext(self, localctx)
                 self.enterOuterAlt(localctx, 7)
                 self.state = 123
-                self.match(IslaLanguageParser.T__14)
+                self.match(IslaLanguageParser.T__20)
+                pass
+            elif token in [IslaLanguageParser.T__14]:
+                localctx = IslaLanguageParser.SepxrAppContext(self, localctx)
+                self.enterOuterAlt(localctx, 8)
                 self.state = 124
+                self.match(IslaLanguageParser.T__14)
+                self.state = 125
                 localctx.op = self._input.LT(1)
                 _la = self._input.LA(1)
                 if not((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << IslaLanguageParser.T__6) | (1 << IslaLanguageParser.ID) | (1 << IslaLanguageParser.DIV) | (1 << IslaLanguageParser.MUL) | (1 << IslaLanguageParser.PLUS) | (1 << IslaLanguageParser.MINUS) | (1 << IslaLanguageParser.GEQ) | (1 << IslaLanguageParser.LEQ) | (1 << IslaLanguageParser.GT) | (1 << IslaLanguageParser.LT))) != 0)):
@@ -1173,19 +1198,19 @@ class IslaLanguageParser ( Parser ):
                 else:
                     self._errHandler.reportMatch(self)
                     self.consume()
-                self.state = 126 
+                self.state = 127 
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
                 while True:
-                    self.state = 125
+                    self.state = 126
                     self.sexpr()
-                    self.state = 128 
+                    self.state = 129 
                     self._errHandler.sync(self)
                     _la = self._input.LA(1)
-                    if not ((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << IslaLanguageParser.T__14) | (1 << IslaLanguageParser.T__17) | (1 << IslaLanguageParser.T__18) | (1 << IslaLanguageParser.T__19) | (1 << IslaLanguageParser.STRING) | (1 << IslaLanguageParser.ID) | (1 << IslaLanguageParser.INT))) != 0)):
+                    if not ((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << IslaLanguageParser.T__14) | (1 << IslaLanguageParser.T__17) | (1 << IslaLanguageParser.T__18) | (1 << IslaLanguageParser.T__19) | (1 << IslaLanguageParser.T__20) | (1 << IslaLanguageParser.STRING) | (1 << IslaLanguageParser.ID) | (1 << IslaLanguageParser.INT))) != 0)):
                         break
 
-                self.state = 130
+                self.state = 131
                 self.match(IslaLanguageParser.T__16)
                 pass
             else:
@@ -1235,7 +1260,7 @@ class IslaLanguageParser ( Parser ):
         self._la = 0 # Token type
         try:
             self.enterOuterAlt(localctx, 1)
-            self.state = 134
+            self.state = 135
             _la = self._input.LA(1)
             if not((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << IslaLanguageParser.T__17) | (1 << IslaLanguageParser.STRING) | (1 << IslaLanguageParser.ID) | (1 << IslaLanguageParser.INT))) != 0)):
                 self._errHandler.recoverInline(self)

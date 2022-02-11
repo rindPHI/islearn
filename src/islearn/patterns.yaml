@@ -11,4 +11,12 @@
   constraint: |
       exists int num:
         forall <?NONTERMINAL> elem in start:
-          count(elem, <?NONTERMINAL>, num)
+          ((>= (str.to.int num) 1) and
+          count(elem, <?NONTERMINAL>, num))
+
+- name: String Existence
+  constraint: |
+      forall <?NONTERMINAL> container in start:
+        exists <?NONTERMINAL> inner_container in container:
+          exists <?NONTERMINAL> elem in inner_container:
+            (= elem <?STRING>)

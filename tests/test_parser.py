@@ -1,9 +1,10 @@
 import unittest
 
-from isla.language import unparse_isla
+from fuzzingbook.Grammars import JSON_GRAMMAR
+from isla import language
 from isla_formalizations import scriptsizec
 
-from islearn.language import parse_abstract_isla
+from islearn.language import parse_abstract_isla, AbstractISLaUnparser
 
 
 class TestParser(unittest.TestCase):
@@ -16,7 +17,9 @@ forall <?NONTERMINAL> use_ctx in start:
         (before(def_ctx, use_ctx) and
         (= def use))"""
 
-        self.assertEqual(pattern.strip(), unparse_isla(parse_abstract_isla(pattern, scriptsizec.SCRIPTSIZE_C_GRAMMAR)))
+        self.assertEqual(
+            pattern.strip(),
+            language.ISLaUnparser(parse_abstract_isla(pattern, scriptsizec.SCRIPTSIZE_C_GRAMMAR)).unparse())
 
     def test_count_pattern(self):
         pattern = """
@@ -24,7 +27,17 @@ exists int num:
   forall <?NONTERMINAL> elem in start:
     count(elem, <?NONTERMINAL>, num)"""
 
-        self.assertEqual(pattern.strip(), unparse_isla(parse_abstract_isla(pattern, scriptsizec.SCRIPTSIZE_C_GRAMMAR)))
+        self.assertEqual(
+            pattern.strip(),
+            language.ISLaUnparser(parse_abstract_isla(pattern, scriptsizec.SCRIPTSIZE_C_GRAMMAR)).unparse())
+
+    def test_string_occurrence(self):
+        pattern = """
+forall <?NONTERMINAL> container in start:
+  exists <?NONTERMINAL> elem in container:
+    (= elem <?STRING>)"""
+
+        self.assertEqual(pattern.strip(), AbstractISLaUnparser(parse_abstract_isla(pattern, JSON_GRAMMAR)).unparse())
 
 
 if __name__ == '__main__':
