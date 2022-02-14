@@ -68,14 +68,28 @@ def connected_chains(relation: Iterable[Tuple[S, S]]) -> Set[Tuple[S, ...]]:
             for chain_1, chain_2 in matches
         }
 
-        result_until_now = result.difference(set(itertools.chain(*matches))) | new_chains
+        result_until_now = result | new_chains
 
         if result_until_now == result:
             break
 
         result = result_until_now
 
-    return result
+    # Exclude subsequences. Cannot do this before, since we need the original
+    # chains for creating longer ones.
+    return {
+        chain for idx, chain in enumerate(result)
+        if not any(
+            idx != other_idx and
+            len(other_chain) > len(chain) and
+            any(
+                other_chain[idx_1:idx_2] == chain
+                for idx_1 in range(len(other_chain))
+                for idx_2 in range(idx_1, len(other_chain) + 1)
+            )
+            for other_idx, other_chain in enumerate(result)
+        )
+    }
 
 
 def transitive_closure(relation: Iterable[Tuple[S, T]]) -> Set[Tuple[S, T]]:
