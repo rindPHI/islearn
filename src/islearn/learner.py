@@ -22,7 +22,7 @@ from isla.type_defs import Grammar
 from swiplserver import PrologMQI
 
 from islearn.helpers import e_assert_present, parallel_all, parallel_any, transitive_closure, mappings, \
-    connected_chains, non_consecutive_ordered_sub_sequences
+    connected_chains, non_consecutive_ordered_sub_sequences, replace_formula_by_formulas
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
     parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser
 
@@ -195,84 +195,33 @@ def generate_candidates(
         logger.debug("Instantiating pattern\n%s", AbstractISLaUnparser(pattern).unparse())
         set_smt_auto_eval(pattern, False)
 
-        in_visitor = InVisitor()
-        pattern.accept(in_visitor)
-
-        variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
-        assert all(chain[-1] == extract_top_level_constant(pattern) for chain in variable_chains)
-
-        instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
-        for variable_chain in variable_chains:
-            nonterminal_sequences: Set[Tuple[str, ...]] = {
-                sequence
-                for nonterminal_chain in nonterminal_chains
-                for sequence in non_consecutive_ordered_sub_sequences(nonterminal_chain[:-1], len(variable_chain) - 1)
-            }
-
-            new_instantiations = [
-                {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
-                 for idx, variable in enumerate(variable_chain[:-1])}
-                for nonterminal_sequence in nonterminal_sequences]
-
-            if not instantiations:
-                instantiations = new_instantiations
-            else:
-                instantiations = [
-                    cast(Dict[NonterminalPlaceholderVariable, language.BoundVariable],
-                         functools.reduce(dict.__or__, t))
-                    for t in list(itertools.product(instantiations, new_instantiations))
-                ]
-
-        pattern_insts_without_nonterminal_placeholders: Set[language.Formula] = {
-            pattern.substitute_variables(instantiation)
-            for instantiation in instantiations
-        }
+        # Instantiate various placeholder variables:
+        # 1. Nonterminal placeholders
+        pattern_insts_without_nonterminal_placeholders = instantiate_nonterminal_placeholders(pattern,
+                                                                                              nonterminal_chains)
 
         logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
                      len(pattern_insts_without_nonterminal_placeholders))
 
-        # Next, we substitute NonterminalStringPlaceholderVariables.
-        pattern_insts_without_nonterminal_string_placeholders: Set[language.Formula] = set([])
-        if any(isinstance(placeholder, NonterminalStringPlaceholderVariable)
-               for inst_pattern in pattern_insts_without_nonterminal_placeholders
-               for placeholder in get_placeholders(inst_pattern)):
-            for inst_pattern in pattern_insts_without_nonterminal_placeholders:
-                for nonterminal in grammar:
-                    def replace_placeholder_by_nonterminal_string(
-                            subformula: language.Formula) -> language.Formula | bool:
-                        if (not isinstance(subformula, language.SemanticPredicateFormula) and
-                                not isinstance(subformula, language.StructuralPredicateFormula)):
-                            return False
+        # 2. Nonterminal-String placeholders
+        pattern_insts_without_nonterminal_string_placeholders = instantiate_nonterminal_string_placeholders(
+            grammar, pattern_insts_without_nonterminal_placeholders)
 
-                        if not any(isinstance(arg, NonterminalStringPlaceholderVariable) for arg in subformula.args):
-                            return False
+        logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
+                     len(pattern_insts_without_nonterminal_string_placeholders))
 
-                        new_args = [
-                            nonterminal if isinstance(arg, NonterminalStringPlaceholderVariable)
-                            else arg
-                            for arg in subformula.args]
+        # 3. String placeholders
+        pattern_insts_without_string_placeholders = instantiate_string_placeholders(
+            pattern_insts_without_nonterminal_string_placeholders, inputs)
 
-                        constructor = (
-                            language.StructuralPredicateFormula
-                            if isinstance(inst_pattern, language.StructuralPredicateFormula)
-                            else language.SemanticPredicateFormula)
-
-                        return constructor(subformula.predicate, *new_args)
-
-                    pattern_insts_without_nonterminal_string_placeholders.add(
-                        language.replace_formula(inst_pattern, replace_placeholder_by_nonterminal_string)
-                    )
-
-            logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
-                         len(pattern_insts_without_nonterminal_string_placeholders))
-        else:
-            pattern_insts_without_nonterminal_string_placeholders = pattern_insts_without_nonterminal_placeholders
+        logger.debug("Found %d instantiations of pattern after instantiating string placeholders",
+                     len(pattern_insts_without_string_placeholders))
 
         assert all(not get_placeholders(candidate)
-                   for candidate in pattern_insts_without_nonterminal_string_placeholders)
+                   for candidate in pattern_insts_without_string_placeholders)
 
         pattern_insts_meeting_atom_requirements: Set[language.Formula] = \
-            set(pattern_insts_without_nonterminal_string_placeholders)
+            set(pattern_insts_without_string_placeholders)
 
         for pattern_filter in filters:
             pattern_insts_meeting_atom_requirements = {
@@ -285,6 +234,146 @@ def generate_candidates(
                          pattern_filter.name)
 
         result.update(pattern_insts_meeting_atom_requirements)
+
+    return result
+
+
+def instantiate_nonterminal_placeholders(
+        pattern: language.Formula,
+        nonterminal_chains: Set[Tuple[str, ...]]) -> Set[language.Formula]:
+    in_visitor = InVisitor()
+    pattern.accept(in_visitor)
+    variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
+    assert all(chain[-1] == extract_top_level_constant(pattern) for chain in variable_chains)
+
+    instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
+    for variable_chain in variable_chains:
+        nonterminal_sequences: Set[Tuple[str, ...]] = {
+            sequence
+            for nonterminal_chain in nonterminal_chains
+            for sequence in non_consecutive_ordered_sub_sequences(nonterminal_chain[:-1], len(variable_chain) - 1)
+        }
+
+        new_instantiations = [
+            {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
+             for idx, variable in enumerate(variable_chain[:-1])}
+            for nonterminal_sequence in nonterminal_sequences]
+
+        if not instantiations:
+            instantiations = new_instantiations
+        else:
+            instantiations = [
+                cast(Dict[NonterminalPlaceholderVariable, language.BoundVariable],
+                     functools.reduce(dict.__or__, t))
+                for t in list(itertools.product(instantiations, new_instantiations))
+            ]
+    pattern_insts_without_nonterminal_placeholders: Set[language.Formula] = {
+        pattern.substitute_variables(instantiation)
+        for instantiation in instantiations
+    }
+    return pattern_insts_without_nonterminal_placeholders
+
+
+def instantiate_nonterminal_string_placeholders(
+        grammar: Grammar,
+        inst_patterns: Set[language.Formula]) -> Set[language.Formula]:
+    if all(not isinstance(placeholder, NonterminalStringPlaceholderVariable)
+           for inst_pattern in inst_patterns
+           for placeholder in get_placeholders(inst_pattern)):
+        return inst_patterns
+
+    result: Set[language.Formula] = set([])
+    for inst_pattern in inst_patterns:
+        for nonterminal in grammar:
+            def replace_placeholder_by_nonterminal_string(
+                    subformula: language.Formula) -> language.Formula | bool:
+                if (not isinstance(subformula, language.SemanticPredicateFormula) and
+                        not isinstance(subformula, language.StructuralPredicateFormula)):
+                    return False
+
+                if not any(isinstance(arg, NonterminalStringPlaceholderVariable) for arg in subformula.args):
+                    return False
+
+                new_args = [
+                    nonterminal if isinstance(arg, NonterminalStringPlaceholderVariable)
+                    else arg
+                    for arg in subformula.args]
+
+                constructor = (
+                    language.StructuralPredicateFormula
+                    if isinstance(inst_pattern, language.StructuralPredicateFormula)
+                    else language.SemanticPredicateFormula)
+
+                return constructor(subformula.predicate, *new_args)
+
+            result.add(language.replace_formula(inst_pattern, replace_placeholder_by_nonterminal_string))
+
+    return result
+
+
+def instantiate_string_placeholders(
+        inst_patterns: Set[language.Formula],
+        inputs: Iterable[language.DerivationTree]
+) -> Set[language.Formula]:
+    if all(not isinstance(placeholder, StringPlaceholderVariable)
+           for inst_pattern in inst_patterns
+           for placeholder in get_placeholders(inst_pattern)):
+        return inst_patterns
+
+    result: Set[language.Formula] = set([])
+    for inst_pattern in inst_patterns:
+        def replace_placeholder_by_string(subformula: language.Formula) -> Optional[Iterable[language.Formula]]:
+            if (not isinstance(subformula, language.SemanticPredicateFormula) and
+                    not isinstance(subformula, language.SemanticPredicateFormula) and
+                    not isinstance(subformula, language.SMTFormula)):
+                return None
+
+            if not any(isinstance(arg, StringPlaceholderVariable) for arg in subformula.free_variables()):
+                return None
+
+            non_ph_vars = {v for v in subformula.free_variables() if not isinstance(v, PlaceholderVariable)}
+
+            # We take all string representations of subtrees with the value of the nonterminal
+            # types of the contained variables.
+            insts = {
+                str(tree)
+                for inp in inputs
+                for _, tree in inp.filter(lambda t: t.value in {v.n_type for v in non_ph_vars})}
+
+            ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariable)}
+            sub_result: Set[language.Formula] = {subformula}
+            for ph in ph_vars:
+                old_sub_result = set(sub_result)
+                sub_result = set([])
+                for f in old_sub_result:
+                    for inst in insts:
+                        def substitute_string_placeholder(formula: language.Formula) -> language.Formula | bool:
+                            if not any(v == ph for v in formula.free_variables()
+                                       if isinstance(v, StringPlaceholderVariable)):
+                                return False
+
+                            if isinstance(formula, language.SMTFormula):
+                                return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
+                                    ph.to_smt(): z3.StringVal(inst)
+                                })), *[v for v in formula.free_variables() if v != ph])
+                            elif isinstance(formula, language.StructuralPredicateFormula):
+                                return language.StructuralPredicateFormula(
+                                    formula.predicate,
+                                    *[inst if arg == ph else arg for arg in formula.args]
+                                )
+                            elif isinstance(formula, language.SemanticPredicateFormula):
+                                return language.SemanticPredicateFormula(
+                                    formula.predicate,
+                                    *[inst if arg == ph else arg for arg in formula.args]
+                                )
+
+                            return False
+
+                        sub_result.add(language.replace_formula(f, substitute_string_placeholder))
+
+            return sub_result
+
+        result.update(replace_formula_by_formulas(inst_pattern, replace_placeholder_by_string))
 
     return result
 

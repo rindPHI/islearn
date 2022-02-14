@@ -1,6 +1,9 @@
 import itertools
+from functools import reduce
 from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict
 
+import isla.language
+import z3
 from pathos import multiprocessing as pmp
 
 S = TypeVar("S")
@@ -118,3 +121,86 @@ def non_consecutive_ordered_sub_sequences(sequence: Iterable[T], length: int) ->
     filters_list = [f for f in list(itertools.product([0, 1], repeat=len(sequence))) if sum(f) == length]
 
     return {tuple(itertools.compress(sequence, a_filter)) for a_filter in filters_list}
+
+
+def construct_multiple(constructor: Callable[..., T], args: List[Iterable]) -> Set[T]:
+    """
+    :param constructor: Constructor to apply to individual arguments.
+    :param args: List of different argument options. Length of outer list must match cardinality of constructor.
+    :return: Instantiated objects for the different possibilities.
+    """
+
+    return {constructor(*combination) for combination in itertools.product(*args)}
+
+
+def reduce_multiple(function: Callable[[T], T], sequence: List[Iterable[T]]) -> Set[T]:
+    return {reduce(function, combination) for combination in itertools.product(*sequence)}
+
+
+def replace_formula_by_formulas(
+        in_formula: isla.language.Formula,
+        to_replace: Callable[[isla.language.Formula], Optional[Iterable[isla.language.Formula]]]
+) -> Set[isla.language.Formula]:
+    """
+    Replaces a formula inside a conjunction or disjunction.
+    to_replace is either (1) a formula to replace, or (2) a predicate which holds if the given formula
+    should been replaced (if it returns True, replace_with must not be None), or (3) a function returning
+    the formula to replace if the subformula should be replaced, or False otherwise. For (3), replace_with
+    may be None (it is irrelevant).
+    """
+
+    maybe_results = to_replace(in_formula)
+    if maybe_results is not None:
+        return {r for result in maybe_results for r in replace_formula_by_formulas(result, to_replace)}
+
+    if isinstance(in_formula, isla.language.ConjunctiveFormula):
+        return reduce_multiple(lambda a, b: a & b, [
+            replace_formula_by_formulas(child, to_replace)
+            for child in in_formula.args])
+    elif isinstance(in_formula, isla.language.DisjunctiveFormula):
+        return reduce_multiple(lambda a, b: a | b, [
+            replace_formula_by_formulas(child, to_replace)
+            for child in in_formula.args])
+    elif isinstance(in_formula, isla.language.NegatedFormula):
+        return {
+            -child_result
+            for child_result in replace_formula_by_formulas(in_formula.args[0], to_replace)
+        }
+    elif isinstance(in_formula, isla.language.ForallFormula):
+        in_formula: isla.language.ForallFormula
+        return construct_multiple(
+            lambda inner_formula: isla.language.ForallFormula(
+                in_formula.bound_variable,
+                in_formula.in_variable,
+                inner_formula,
+                in_formula.bind_expression,
+                in_formula.already_matched,
+                id=in_formula.id
+            ), [replace_formula_by_formulas(in_formula.inner_formula, to_replace)])
+    elif isinstance(in_formula, isla.language.ExistsFormula):
+        in_formula: isla.language.ExistsFormula
+        return construct_multiple(
+            lambda inner_formula: isla.language.ExistsFormula(
+                in_formula.bound_variable,
+                in_formula.in_variable,
+                inner_formula,
+                in_formula.bind_expression),
+            [replace_formula_by_formulas(in_formula.inner_formula, to_replace)])
+    elif isinstance(in_formula, isla.language.ExistsIntFormula):
+        in_formula: isla.language.ExistsIntFormula
+        return construct_multiple(
+            lambda inner_formula:
+            isla.language.ExistsIntFormula(
+                in_formula.bound_variable,
+                inner_formula),
+            [replace_formula_by_formulas(in_formula.inner_formula, to_replace)])
+    elif isinstance(in_formula, isla.language.ForallIntFormula):
+        in_formula: isla.language.ForallIntFormula
+        return construct_multiple(
+            lambda inner_formula:
+            isla.language.ForallIntFormula(
+                in_formula.bound_variable,
+                inner_formula),
+            [replace_formula_by_formulas(in_formula.inner_formula, to_replace)])
+
+    return {in_formula}
