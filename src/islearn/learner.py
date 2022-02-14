@@ -14,7 +14,7 @@ from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
 import isla.fuzzer
 import z3
 from grammar_graph import gg
-from isla import language
+from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.helpers import is_z3_var, is_nonterminal, z3_subst, dict_of_lists_to_list_of_dicts
 from isla.isla_predicates import is_before, BEFORE_PREDICATE, COUNT_PREDICATE, reachable
@@ -66,9 +66,9 @@ def learn_invariants(
     generate_sample_inputs(grammar, prop, negative_examples, positive_examples)
 
     logger.info(
-       "Generated %d additional positive, and %d additional negative samples (from scratch).",
-       len(positive_examples) - pe_before,
-       len(negative_examples) - ne_before
+        "Generated %d additional positive, and %d additional negative samples (from scratch).",
+        len(positive_examples) - pe_before,
+        len(negative_examples) - ne_before
     )
 
     assert len(positive_examples) > 0, "Cannot learn without any positive examples!"
@@ -163,17 +163,7 @@ def generate_candidates(
         patterns: Iterable[language.Formula | str],
         inputs: Iterable[language.DerivationTree],
         grammar: Grammar) -> Set[language.Formula]:
-    filters: List[PatternInstantiationFilter] = [
-        StructuralPredicatesFilter(),
-        # VariablesEqualFilter(),  # Seems to bring no benefit!
-    ]
-
-    patterns = [
-        parse_abstract_isla(pattern, grammar) if isinstance(pattern, str)
-        else pattern
-        for pattern in patterns]
-
-    result: Set[language.Formula] = set([])
+    graph = gg.GrammarGraph.from_grammar(grammar)
 
     nonterminal_paths: Set[Tuple[str, ...]] = {
         tuple([inp.get_subtree(path[:idx]).value
@@ -187,6 +177,19 @@ def generate_candidates(
         if not any(len(path_) > len(path) and path_[:len(path)] == path for path_ in nonterminal_paths)
     }
     assert all(chain[-1] == "<start>" for chain in nonterminal_chains)
+
+    filters: List[PatternInstantiationFilter] = [
+        StructuralPredicatesFilter(),
+        VariablesEqualFilter(),
+        NonterminalStringInCountPredicatesFilter(graph, nonterminal_chains)
+    ]
+
+    patterns = [
+        parse_abstract_isla(pattern, grammar) if isinstance(pattern, str)
+        else pattern
+        for pattern in patterns]
+
+    result: Set[language.Formula] = set([])
 
     for pattern in patterns:
         logger.debug("Instantiating pattern\n%s", AbstractISLaUnparser(pattern).unparse())
@@ -228,10 +231,48 @@ def generate_candidates(
         logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
                      len(pattern_insts_without_nonterminal_placeholders))
 
-        assert all(not get_placeholders(candidate) for candidate in pattern_insts_without_nonterminal_placeholders)
+        # Next, we substitute NonterminalStringPlaceholderVariables.
+        pattern_insts_without_nonterminal_string_placeholders: Set[language.Formula] = set([])
+        if any(isinstance(placeholder, NonterminalStringPlaceholderVariable)
+               for inst_pattern in pattern_insts_without_nonterminal_placeholders
+               for placeholder in get_placeholders(inst_pattern)):
+            for inst_pattern in pattern_insts_without_nonterminal_placeholders:
+                for nonterminal in grammar:
+                    def replace_placeholder_by_nonterminal_string(
+                            subformula: language.Formula) -> language.Formula | bool:
+                        if (not isinstance(subformula, language.SemanticPredicateFormula) and
+                                not isinstance(subformula, language.StructuralPredicateFormula)):
+                            return False
+
+                        if not any(isinstance(arg, NonterminalStringPlaceholderVariable) for arg in subformula.args):
+                            return False
+
+                        new_args = [
+                            nonterminal if isinstance(arg, NonterminalStringPlaceholderVariable)
+                            else arg
+                            for arg in subformula.args]
+
+                        constructor = (
+                            language.StructuralPredicateFormula
+                            if isinstance(inst_pattern, language.StructuralPredicateFormula)
+                            else language.SemanticPredicateFormula)
+
+                        return constructor(subformula.predicate, *new_args)
+
+                    pattern_insts_without_nonterminal_string_placeholders.add(
+                        language.replace_formula(inst_pattern, replace_placeholder_by_nonterminal_string)
+                    )
+
+            logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
+                         len(pattern_insts_without_nonterminal_string_placeholders))
+        else:
+            pattern_insts_without_nonterminal_string_placeholders = pattern_insts_without_nonterminal_placeholders
+
+        assert all(not get_placeholders(candidate)
+                   for candidate in pattern_insts_without_nonterminal_string_placeholders)
 
         pattern_insts_meeting_atom_requirements: Set[language.Formula] = \
-            set(pattern_insts_without_nonterminal_placeholders)
+            set(pattern_insts_without_nonterminal_string_placeholders)
 
         for pattern_filter in filters:
             pattern_insts_meeting_atom_requirements = {
@@ -290,11 +331,14 @@ class VariablesEqualFilter(PatternInstantiationFilter):
                     List[NonterminalPlaceholderVariable],
                     list(smt_equality_formula.free_variables()))
 
+                trees_1 = inp.filter(lambda t: t.value == free_vars[0].n_type)
+                trees_2 = inp.filter(lambda t: t.value == free_vars[1].n_type)
+
                 if not any(
                         t1.value == free_vars[0].n_type and
                         t2.value == free_vars[1].n_type
                         for (p1, t1), (p2, t2)
-                        in itertools.product(*[[(path, tree) for path, tree in inp.paths()] for _ in range(2)])
+                        in itertools.product(trees_1, trees_2)
                         if str(t1) == str(t2) and p1 != p2):
                     success = False
                     break
@@ -340,6 +384,55 @@ class StructuralPredicatesFilter(PatternInstantiationFilter):
                 return True
 
         return False
+
+
+class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
+    def __init__(self, graph: gg.GrammarGraph, nonterminal_chains: Set[Tuple[str, ...]]):
+        super().__init__("Nonterminal String in `count` Predicates Filter")
+        self.graph = graph
+        self.nonterminal_chains = nonterminal_chains
+
+    def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
+        return reachable(self.graph, from_nonterminal, to_nonterminal)
+
+    def reachable_in_inputs(self, from_nonterminal: str, to_nonterminal: str) -> bool:
+        from_nonterminal, to_nonterminal = to_nonterminal, from_nonterminal
+        return any(
+            from_nonterminal == nonterminal_1 and
+            to_nonterminal == nonterminal_2
+            for path in self.nonterminal_chains
+            for idx_1, nonterminal_1 in enumerate(path)
+            for idx_2, nonterminal_2 in enumerate(path)
+            if idx_1 < idx_2
+        )
+
+    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+        # In `count(elem, nonterminal, num)` occurrences
+        # 1. the nonterminal must be reachable from the nonterminal type of elem. We
+        #    consider reachability as defined by the sample inputs, not the grammar,
+        #    to increase precision,
+        # 2. it must be possible that the nonterminal occurs a variable number of times
+        #    in the subgrammar of elem's nonterminal type.
+
+        count_predicates: List[language.SemanticPredicateFormula] = cast(
+            List[language.SemanticPredicateFormula],
+            language.FilterVisitor(
+                lambda f: isinstance(f, language.SemanticPredicateFormula) and
+                          f.predicate == isla_predicates.COUNT_PREDICATE).collect(formula))
+
+        if not count_predicates:
+            return True
+
+        def reachable_variable_number_of_times(start_nonterminal: str, needle_nonterminal: str) -> bool:
+            return any(self.reachable_in_inputs(start_nonterminal, other_nonterminal) and
+                       self.reachable(other_nonterminal, other_nonterminal) and
+                       self.reachable_in_inputs(other_nonterminal, needle_nonterminal)
+                       for other_nonterminal in self.graph.grammar)
+
+        return any(
+            reachable_variable_number_of_times(count_predicate.args[0].n_type, count_predicate.args[1])
+            for count_predicate in count_predicates
+        )
 
 
 def generate_candidates_prolog(

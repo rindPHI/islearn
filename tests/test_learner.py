@@ -86,7 +86,14 @@ forall <expr> use_ctx in start:
         pattern = """
 exists int num:
   forall <?NONTERMINAL> elem in start:
-    count(elem, <?NONTERMINAL>, num)"""
+    ((>= (str.to.int num) 1) and
+    count(elem, <?NONTERMINAL>, num))"""
+
+        correct_property = """
+exists int num:
+  forall <csv-record> elem in start:
+    ((>= (str.to.int num) 1) and
+    count(elem, "<raw-field>", num))"""
 
         raw_inputs = [
             """1a;\"2   a\";\" 12\"
@@ -106,21 +113,9 @@ exists int num:
             for inp in raw_inputs]
 
         candidates = generate_candidates([pattern], inputs, csv.CSV_GRAMMAR)
-        result = [candidate for candidate in candidates
-                  if all(evaluate(candidate, inp, csv.CSV_GRAMMAR)
-                         for inp in inputs)]
+        # print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
-        self.assertEqual(2, len(result))
-        for formula in result:
-            vars = {var.name: var for var in language.VariablesCollector.collect(formula)}
-            self.assertEqual(vars["elem"].n_type, "<csv-record>")
-
-            needle_values = {
-                cast(language.SemanticPredicateFormula, f).args[1]
-                for f in
-                language.FilterVisitor(lambda f: isinstance(f, language.SemanticPredicateFormula)).collect(formula)}
-            for needle in needle_values:
-                self.assertIn(needle, {"<csv-string-list>", "<raw-field>"})
+        self.assertIn(correct_property.strip(), list(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
     def test_learn_invariants_simple_csv_colno(self):
         correct_property = """
@@ -145,17 +140,20 @@ exists int num:
             parse_isla(correct_property, csv.CSV_GRAMMAR, semantic_predicates=STANDARD_SEMANTIC_PREDICATES),
             result)
 
-        self.assertEqual(2, len(result))
         for formula in result:
             vars = {var.name: var for var in language.VariablesCollector.collect(formula)}
-            self.assertEqual(vars["elem"].n_type, "<csv-record>")
+            self.assertIn(vars["elem"].n_type, {"<csv-record>", "<csv-file>", "<csv-header>"})
 
             needle_values = {
                 cast(language.SemanticPredicateFormula, f).args[1]
                 for f in
                 language.FilterVisitor(lambda f: isinstance(f, language.SemanticPredicateFormula)).collect(formula)}
             for needle in needle_values:
-                self.assertIn(needle, {"<csv-string-list>", "<raw-field>"})
+                self.assertIn(needle, {"<csv-string-list>", "<raw-field>", "<csv-record>", "<csv-record-1>"})
+
+        perfect_precision_formulas = [f for f, p in result.items() if p == 1]
+        self.assertEqual(2, len(perfect_precision_formulas))
+        self.assertIn(correct_property.strip(), [ISLaUnparser(f).unparse() for f in perfect_precision_formulas])
 
     def test_string_existence(self):
         correct_property = """
