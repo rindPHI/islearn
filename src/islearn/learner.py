@@ -25,6 +25,7 @@ from islearn.helpers import e_assert_present, parallel_all, parallel_any, transi
     connected_chains, non_consecutive_ordered_sub_sequences, replace_formula_by_formulas
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
     parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser
+from islearn.mutation import MutationFuzzer
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
 logger = logging.getLogger("learner")
@@ -38,7 +39,8 @@ def learn_invariants(
         patterns: Optional[List[language.Formula | str]] = None,
         pattern_file: Optional[str] = None,
         activated_patterns: Optional[Iterable[str]] = None,
-        deactivated_patterns: Optional[Iterable[str]] = None) -> Dict[language.Formula, float]:
+        deactivated_patterns: Optional[Iterable[str]] = None,
+        k: int = 3) -> Dict[language.Formula, float]:
     positive_examples = set(positive_examples or [])
     negative_examples = set(negative_examples or [])
 
@@ -61,6 +63,12 @@ def learn_invariants(
 
     # TODO: Also consider inverted patterns.
 
+    logger.info(
+        "Starting with %d positive, and %d negative samples.",
+        len(positive_examples),
+        len(negative_examples)
+    )
+
     ne_before = len(negative_examples)
     pe_before = len(positive_examples)
     generate_sample_inputs(grammar, prop, negative_examples, positive_examples)
@@ -73,7 +81,35 @@ def learn_invariants(
 
     assert len(positive_examples) > 0, "Cannot learn without any positive examples!"
 
-    candidates = generate_candidates(patterns, positive_examples, grammar)
+    pe_before = len(positive_examples)
+    ne_before = len(negative_examples)
+    mutation_fuzzer = MutationFuzzer(grammar, positive_examples, prop, k=k)
+    for inp in mutation_fuzzer.run(num_iterations=50, alpha=.1, yield_negative=True):
+        if prop(inp):
+            positive_examples.add(inp)
+        else:
+            negative_examples.add(inp)
+
+    logger.info(
+        "Generated %d additional positive, and %d additional negative samples (by mutation fuzzing).",
+        len(positive_examples) - pe_before,
+        len(negative_examples) - ne_before
+    )
+
+    graph = gg.GrammarGraph.from_grammar(grammar)
+    positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k)
+    positive_examples_for_learning = filter_inputs_by_paths(positive_examples, graph, max_cnt=2, k=k, prefer_small=True)
+    negative_examples = filter_inputs_by_paths(negative_examples, graph, max_cnt=10, k=k)
+
+    logger.info(
+        "Reduced positive / negative samples to subsets of %d / %d samples based on k-path coverage, "
+        "keeping %d positive examples for candidate generation.",
+        len(positive_examples),
+        len(negative_examples),
+        len(positive_examples_for_learning),
+    )
+
+    candidates = generate_candidates(patterns, positive_examples_for_learning, grammar)
     logger.info("Found %d invariant candidates", len(candidates))
 
     # Only consider *real* invariants
@@ -92,14 +128,30 @@ def learn_invariants(
     # )
 
     logger.info("Calculating precision")
-    result: Dict[language.Formula, float] = {}
-    for invariant in invariants:
-        with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-            num_counter_examples = sum(pool.map(
-                lambda negative_example: int(evaluate(invariant, negative_example, grammar).is_true()),
-                negative_examples))
 
-        result[invariant] = 1 - (num_counter_examples / (len(negative_examples) or 1))
+    with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+        eval_results = pool.map(
+            lambda t: (t[0], int(evaluate(t[0], t[1], grammar).is_true())),
+            itertools.product(invariants, negative_examples),
+            chunksize=10
+        )
+
+    result: Dict[language.Formula, float] = {
+        inv: 1 - (sum([eval_result for other_inv, eval_result in eval_results if other_inv == inv])
+                  / len(negative_examples))
+        for inv in invariants
+    }
+
+    # result: Dict[language.Formula, float] = {}
+    # for invariant in invariants:
+    #   with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+    #       num_counter_examples = sum(pool.map(
+    #           lambda negative_example: int(evaluate(invariant, negative_example, grammar).is_true()),
+    #           negative_examples))
+
+    #   result[invariant] = 1 - (num_counter_examples / (len(negative_examples) or 1))
+
+    logger.info("Done.")
 
     return dict(cast(List[Tuple[language.Formula, float]],
                      sorted(result.items(), key=lambda p: p[1], reverse=True)))
@@ -159,12 +211,49 @@ def generate_counter_examples_from_formulas(
     return result
 
 
+def filter_inputs_by_paths(
+        inputs: Iterable[language.DerivationTree],
+        graph: gg.GrammarGraph,
+        max_cnt: int = 10,
+        k: int = 3,
+        prefer_small=False) -> Set[language.DerivationTree]:
+    inputs = set(inputs)
+
+    if len(inputs) <= max_cnt:
+        return inputs
+
+    tree_paths = {inp: graph.k_paths_in_tree(inp.to_parse_tree(), k) for inp in inputs}
+
+    result: Set[language.DerivationTree] = set([])
+    covered_paths: Set[Tuple[gg.Node, ...]] = set([])
+
+    def uncovered_paths(inp: language.DerivationTree) -> Set[Tuple[gg.Node, ...]]:
+        return {path for path in tree_paths[inp] if path not in covered_paths}
+
+    while inputs and len(result) < max_cnt and len(covered_paths) < len(graph.k_paths(k)):
+        if prefer_small:
+            try:
+                inp = next(inp for inp in sorted(inputs, key=lambda inp: len(inp))
+                           if uncovered_paths(inp))
+            except StopIteration:
+                break
+        else:
+            inp = sorted(inputs, key=lambda inp: (len(uncovered_paths(inp)), -len(inp)), reverse=True)[0]
+
+        covered_paths.update(tree_paths[inp])
+        inputs.remove(inp)
+        result.add(inp)
+
+    return result
+
+
 def generate_candidates(
         patterns: Iterable[language.Formula | str],
         inputs: Iterable[language.DerivationTree],
         grammar: Grammar) -> Set[language.Formula]:
     graph = gg.GrammarGraph.from_grammar(grammar)
 
+    logger.debug("Computing nonterminal chains in inputs.")
     nonterminal_paths: Set[Tuple[str, ...]] = {
         tuple([inp.get_subtree(path[:idx]).value
                for idx in range(len(path))])
@@ -177,6 +266,7 @@ def generate_candidates(
         if not any(len(path_) > len(path) and path_[:len(path)] == path for path_ in nonterminal_paths)
     }
     assert all(chain[-1] == "<start>" for chain in nonterminal_chains)
+    logger.debug("Found %d nonterminal chains.", len(nonterminal_chains))
 
     filters: List[PatternInstantiationFilter] = [
         StructuralPredicatesFilter(),
@@ -197,8 +287,8 @@ def generate_candidates(
 
         # Instantiate various placeholder variables:
         # 1. Nonterminal placeholders
-        pattern_insts_without_nonterminal_placeholders = instantiate_nonterminal_placeholders(pattern,
-                                                                                              nonterminal_chains)
+        pattern_insts_without_nonterminal_placeholders = instantiate_nonterminal_placeholders(
+            pattern, nonterminal_chains)
 
         logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
                      len(pattern_insts_without_nonterminal_placeholders))

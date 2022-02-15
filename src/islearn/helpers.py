@@ -19,32 +19,22 @@ def e_assert(expression: T, assertion: Callable[[T], bool], message: Optional[st
     return expression
 
 
-def parallel_all(f: Callable[[T], bool], iterable: Iterable[T], chunk_size=16, processes=pmp.cpu_count()) -> bool:
-    l = list(iterable)
-    chunked_list = [l[i:i + chunk_size] for i in range(0, len(l), chunk_size)]
-
-    idx = 0
-    while idx < len(chunked_list):
-        with pmp.ProcessingPool(processes=processes) as pool:
-            if not all(pool.map(lambda chunk: all(f(elem) for elem in chunk), chunked_list[idx:idx + processes])):
+def parallel_all(f: Callable[[T], bool], iterable: Iterable[T], processes=pmp.cpu_count()) -> bool:
+    with pmp.ProcessingPool(processes=processes) as pool:
+        results = pool.uimap(f, iterable)
+        for result in results:
+            if not result:
                 return False
-
-        idx += processes
 
     return True
 
 
-def parallel_any(f: Callable[[T], bool], iterable: Iterable[T], chunk_size=16, processes=pmp.cpu_count()) -> bool:
-    l = list(iterable)
-    chunked_list = [l[i:i + chunk_size] for i in range(0, len(l), chunk_size)]
-
-    idx = 0
-    while idx < len(chunked_list):
-        with pmp.ProcessingPool(processes=processes) as pool:
-            if any(pool.map(lambda chunk: any(f(elem) for elem in chunk), chunked_list[idx:idx + processes])):
+def parallel_any(f: Callable[[T], bool], iterable: Iterable[T], processes=pmp.cpu_count()) -> bool:
+    with pmp.ProcessingPool(processes=processes) as pool:
+        results = pool.uimap(f, iterable)
+        for result in results:
+            if result:
                 return True
-
-        idx += processes
 
     return False
 

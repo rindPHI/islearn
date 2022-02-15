@@ -75,8 +75,8 @@ forall <expr> use_ctx in start:
             positive_examples=inputs
         )
 
-        print(len(result))
-        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        # print(len(result))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             correct_property.strip(),
@@ -171,17 +171,11 @@ forall <object> container in start:
             json_obj = json.loads(str(tree))
             return isinstance(json_obj, dict) and "key" in json_obj
 
-        inputs = [' { "key" : 13 } ', ' { "asdf" : [ 13 ] , "key" : "x" } ']
+        inputs = [' { "key" : 13 } ']
         trees = [language.DerivationTree.from_parse_tree(next(EarleyParser(grammar).parse(inp)))
                  for inp in inputs]
 
         self.assertTrue(all(evaluate(correct_property, tree, grammar) for tree in trees))
-
-        # candidates = generate_candidates([patterns_from_file()["String Existence"]], trees, grammar)
-        # self.assertIn(correct_property.strip(), list(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
-
-        # print(len(candidates))
-        # print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
         result = learn_invariants(
             grammar,
