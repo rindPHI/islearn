@@ -17,6 +17,5 @@
 - name: String Existence
   constraint: |
       forall <?NONTERMINAL> container in start:
-        exists <?NONTERMINAL> inner_container in container:
-          exists <?NONTERMINAL> elem in inner_container:
-            (= elem <?STRING>)
+        exists <?NONTERMINAL> elem in container:
+          (= elem <?STRING>)

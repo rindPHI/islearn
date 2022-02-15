@@ -1,6 +1,6 @@
 import itertools
 from functools import reduce
-from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict
+from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict, Sequence
 
 import isla.language
 import z3
@@ -19,7 +19,19 @@ def e_assert(expression: T, assertion: Callable[[T], bool], message: Optional[st
     return expression
 
 
-def parallel_all(f: Callable[[T], bool], iterable: Iterable[T], processes=pmp.cpu_count()) -> bool:
+def parallel_all(f: Callable[[T], bool], iterable: Iterable[T], chunk_size=16, processes=pmp.cpu_count()) -> bool:
+    # l = list(iterable)
+    # chunked_list = [l[i:i + chunk_size] for i in range(0, len(l), chunk_size)]
+    #
+    # idx = 0
+    # while idx < len(chunked_list):
+    #     with pmp.ProcessingPool(processes=processes) as pool:
+    #         if not all(pool.map(lambda chunk: all(f(elem) for elem in chunk), chunked_list[idx:idx + processes])):
+    #             return False
+    #
+    #     idx += processes
+    #
+    # return True
     with pmp.ProcessingPool(processes=processes) as pool:
         results = pool.uimap(f, iterable)
         for result in results:
@@ -111,6 +123,20 @@ def non_consecutive_ordered_sub_sequences(sequence: Iterable[T], length: int) ->
     filters_list = [f for f in list(itertools.product([0, 1], repeat=len(sequence))) if sum(f) == length]
 
     return {tuple(itertools.compress(sequence, a_filter)) for a_filter in filters_list}
+
+
+def all_interleavings(a: Sequence[S], b: Sequence[T]) -> List[List[S | T]]:
+    slots = [None] * (len(a) + len(b))
+    for splice in itertools.combinations(range(0, len(slots)), len(b)):
+        it_B = iter(b)
+        for s in splice:
+            slots[s] = next(it_B)
+        it_A = iter(a)
+        slots = [e if e else next(it_A) for e in slots]
+        yield slots
+        slots = [None] * (len(slots))
+
+    return slots
 
 
 def construct_multiple(constructor: Callable[..., T], args: List[Iterable]) -> Set[T]:

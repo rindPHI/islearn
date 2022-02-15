@@ -12,15 +12,17 @@ import z3
 from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate
-from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts
+from isla.existential_helpers import paths_between
+from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, is_nonterminal
 from isla.isla_predicates import reachable
-from isla.language import set_smt_auto_eval
+from isla.language import set_smt_auto_eval, ISLaUnparser
 from isla.solver import ISLaSolver
 from isla.type_defs import Grammar
+from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
 from islearn.helpers import parallel_all, connected_chains, non_consecutive_ordered_sub_sequences, \
-    replace_formula_by_formulas
+    replace_formula_by_formulas, transitive_closure
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
     parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser
 from islearn.mutation import MutationFuzzer
@@ -59,7 +61,7 @@ def learn_invariants(
             else parse_abstract_isla(pattern, grammar)
             for pattern in patterns]
 
-    # TODO: Also consider inverted patterns.
+    # Also consider inverted patterns?
 
     logger.info(
         "Starting with %d positive, and %d negative samples.",
@@ -72,7 +74,7 @@ def learn_invariants(
     generate_sample_inputs(grammar, prop, negative_examples, positive_examples)
 
     logger.info(
-        "Generated %d additional positive, and %d additional negative samples (from scratch).",
+        "Generated %d additional positive, and %d additional negative samples (by grammar fuzzing).",
         len(positive_examples) - pe_before,
         len(negative_examples) - ne_before
     )
@@ -95,9 +97,13 @@ def learn_invariants(
     )
 
     graph = gg.GrammarGraph.from_grammar(grammar)
-    positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k)
-    positive_examples_for_learning = filter_inputs_by_paths(positive_examples, graph, max_cnt=2, k=k, prefer_small=True)
-    negative_examples = filter_inputs_by_paths(negative_examples, graph, max_cnt=10, k=k)
+    positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k, prefer_small=True)
+    positive_examples_for_learning = filter_inputs_by_paths(positive_examples, graph, max_cnt=7, k=k, prefer_small=True)
+    negative_examples = filter_inputs_by_paths(negative_examples, graph, max_cnt=10, k=k, prefer_small=True)
+
+    # logger.debug(
+    #     "Examples for learning:\n%s",
+    #     "\n".join(map(str, positive_examples_for_learning)))
 
     logger.info(
         "Reduced positive / negative samples to subsets of %d / %d samples based on k-path coverage, "
@@ -108,7 +114,9 @@ def learn_invariants(
     )
 
     candidates = generate_candidates(patterns, positive_examples_for_learning, grammar)
-    logger.info("Found %d invariant candidates", len(candidates))
+    logger.info("Found %d invariant candidates.", len(candidates))
+
+    logger.info("Filtering invariants.")
 
     # Only consider *real* invariants
     invariants = [
@@ -116,7 +124,7 @@ def learn_invariants(
         if parallel_all(lambda inp: evaluate(candidate, inp, grammar).is_true(), positive_examples)
     ]
 
-    logger.info("%d invariants remain after filtering", len(invariants))
+    logger.info("%d invariants remain after filtering.", len(invariants))
 
     # ne_before = len(negative_examples)
     # negative_examples.update(generate_counter_examples_from_formulas(grammar, prop, invariants))
@@ -125,7 +133,7 @@ def learn_invariants(
     #     len(negative_examples) - ne_before
     # )
 
-    logger.info("Calculating precision")
+    logger.info("Calculating precision.")
 
     with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
         eval_results = pool.map(
@@ -140,6 +148,8 @@ def learn_invariants(
         for inv in invariants
     }
 
+    logger.info("Found %d invariants with non-zero precision.", len([p for p in result.values() if p > 0]))
+
     # result: Dict[language.Formula, float] = {}
     # for invariant in invariants:
     #   with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
@@ -148,8 +158,6 @@ def learn_invariants(
     #           negative_examples))
 
     #   result[invariant] = 1 - (num_counter_examples / (len(negative_examples) or 1))
-
-    logger.info("Done.")
 
     return dict(cast(List[Tuple[language.Formula, float]],
                      sorted(result.items(), key=lambda p: p[1], reverse=True)))
@@ -251,7 +259,6 @@ def generate_candidates(
         grammar: Grammar) -> Set[language.Formula]:
     graph = gg.GrammarGraph.from_grammar(grammar)
 
-    logger.debug("Computing nonterminal chains in inputs.")
     nonterminal_paths: Set[Tuple[str, ...]] = {
         tuple([inp.get_subtree(path[:idx]).value
                for idx in range(len(path))])
@@ -259,17 +266,18 @@ def generate_candidates(
         for path, _ in inp.leaves()
     }
 
-    nonterminal_chains: Set[Tuple[str, ...]] = {
-        tuple(reversed(path)) for path in nonterminal_paths
-        if not any(len(path_) > len(path) and path_[:len(path)] == path for path_ in nonterminal_paths)
-    }
-    assert all(chain[-1] == "<start>" for chain in nonterminal_chains)
-    logger.debug("Found %d nonterminal chains.", len(nonterminal_chains))
+    input_reachability_relation: Set[Tuple[str, str]] = transitive_closure({
+        pair
+        for path in nonterminal_paths
+        for pair in [(path[i], path[k]) for i in range(len(path)) for k in range(i + 1, len(path))]
+    })
+
+    logger.debug("Computed input reachability relation of size %d", len(input_reachability_relation))
 
     filters: List[PatternInstantiationFilter] = [
         StructuralPredicatesFilter(),
         VariablesEqualFilter(),
-        NonterminalStringInCountPredicatesFilter(graph, nonterminal_chains)
+        NonterminalStringInCountPredicatesFilter(graph, input_reachability_relation)
     ]
 
     patterns = [
@@ -286,7 +294,7 @@ def generate_candidates(
         # Instantiate various placeholder variables:
         # 1. Nonterminal placeholders
         pattern_insts_without_nonterminal_placeholders = instantiate_nonterminal_placeholders(
-            pattern, nonterminal_chains)
+            pattern, input_reachability_relation, graph)
 
         logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
                      len(pattern_insts_without_nonterminal_placeholders))
@@ -300,7 +308,7 @@ def generate_candidates(
 
         # 3. String placeholders
         pattern_insts_without_string_placeholders = instantiate_string_placeholders(
-            pattern_insts_without_nonterminal_string_placeholders, inputs)
+            pattern_insts_without_nonterminal_string_placeholders, inputs, grammar)
 
         logger.debug("Found %d instantiations of pattern after instantiating string placeholders",
                      len(pattern_insts_without_string_placeholders))
@@ -328,7 +336,8 @@ def generate_candidates(
 
 def instantiate_nonterminal_placeholders(
         pattern: language.Formula,
-        nonterminal_chains: Set[Tuple[str, ...]]) -> Set[language.Formula]:
+        input_reachability_relation: Set[Tuple[str, str]],
+        graph: gg.GrammarGraph) -> Set[language.Formula]:
     in_visitor = InVisitor()
     pattern.accept(in_visitor)
     variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
@@ -336,10 +345,28 @@ def instantiate_nonterminal_placeholders(
 
     instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
     for variable_chain in variable_chains:
-        nonterminal_sequences: Set[Tuple[str, ...]] = {
-            sequence
-            for nonterminal_chain in nonterminal_chains
-            for sequence in non_consecutive_ordered_sub_sequences(nonterminal_chain[:-1], len(variable_chain) - 1)
+        nonterminal_sequences: Set[Tuple[str, ...]] = set([])
+
+        partial_sequences: Set[Tuple[str, ...]] = {("<start>",)}
+        while partial_sequences:
+            partial_sequence = next(iter(partial_sequences))
+            partial_sequences.remove(partial_sequence)
+            if len(partial_sequence) == len(variable_chain):
+                nonterminal_sequences.add(tuple(reversed(partial_sequence)))
+                continue
+
+            partial_sequences.update({
+                partial_sequence + (to_nonterminal,)
+                for (from_nonterminal, to_nonterminal) in input_reachability_relation
+                if from_nonterminal == partial_sequence[-1]})
+
+        nonredundant_nonterminal_sequences = {
+            seq for seq in nonterminal_sequences
+            if not any(
+                other_seq != seq and
+                chain_implies(tuple(reversed(other_seq)), tuple(reversed(seq)), graph)
+                for other_seq in nonterminal_sequences
+            )
         }
 
         new_instantiations = [
@@ -355,11 +382,20 @@ def instantiate_nonterminal_placeholders(
                      functools.reduce(dict.__or__, t))
                 for t in list(itertools.product(instantiations, new_instantiations))
             ]
-    pattern_insts_without_nonterminal_placeholders: Set[language.Formula] = {
+
+    result: Set[language.Formula] = {
         pattern.substitute_variables(instantiation)
         for instantiation in instantiations
     }
-    return pattern_insts_without_nonterminal_placeholders
+
+    return result
+
+    # nonredundant_result: Set[language.Formula] = {
+    #     f for f in result
+    #     if not any(other != f and formula_structurally_implies(other, f, graph) for other in result)
+    # }
+    #
+    # return nonredundant_result
 
 
 def instantiate_nonterminal_string_placeholders(
@@ -401,12 +437,28 @@ def instantiate_nonterminal_string_placeholders(
 
 def instantiate_string_placeholders(
         inst_patterns: Set[language.Formula],
-        inputs: Iterable[language.DerivationTree]
+        inputs: Iterable[language.DerivationTree],
+        grammar: Grammar,
 ) -> Set[language.Formula]:
     if all(not isinstance(placeholder, StringPlaceholderVariable)
            for inst_pattern in inst_patterns
            for placeholder in get_placeholders(inst_pattern)):
         return inst_patterns
+
+    fragments: Dict[str, Set[str]] = {
+        nonterminal: functools.reduce(
+            set.intersection,
+            [
+                {
+                    str(subtree)
+                    for _, subtree in inp.filter(lambda t: t.value == nonterminal)
+                    if str(subtree)
+                }
+                for inp in inputs
+            ]
+        )
+        for nonterminal in grammar
+    }
 
     result: Set[language.Formula] = set([])
     for inst_pattern in inst_patterns:
@@ -421,12 +473,7 @@ def instantiate_string_placeholders(
 
             non_ph_vars = {v for v in subformula.free_variables() if not isinstance(v, PlaceholderVariable)}
 
-            # We take all string representations of subtrees with the value of the nonterminal
-            # types of the contained variables.
-            insts = {
-                str(tree)
-                for inp in inputs
-                for _, tree in inp.filter(lambda t: t.value in {v.n_type for v in non_ph_vars})}
+            insts = functools.reduce(set.__or__, [fragments.get(var.n_type, set([])) for var in non_ph_vars])
 
             ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariable)}
             sub_result: Set[language.Formula] = {subformula}
@@ -464,6 +511,99 @@ def instantiate_string_placeholders(
         result.update(replace_formula_by_formulas(inst_pattern, replace_placeholder_by_string))
 
     return result
+
+
+def formula_structurally_implies(
+        formula_1: language.Formula, formula_2: language.Formula, graph: gg.GrammarGraph) -> bool:
+    """
+    This predicate holds true if both formula_1 and formula_2 are quantified formulas of the same structure
+    starting with a quantifier block, and the elements addressed by the second quantifier are a subset of
+    the elements addressed by the first quantifier.
+    """
+
+    qfr_block_1 = get_quantifier_block(formula_1)
+    qfr_block_2 = get_quantifier_block(formula_2)
+
+    if (len(qfr_block_1) != len(qfr_block_2) or
+            any(not isinstance(qfr_block_1[idx], type(qfr_block_2[idx])) for idx in range(len(qfr_block_1)))):
+        return False
+
+    unconnected_chains: Tuple[List[Tuple[str, str]], List[Tuple[str, str]]] = ([], [])
+    for idx, qfr_block in enumerate([qfr_block_1, qfr_block_2]):
+        for qfr in qfr_block:
+            unconnected_chains[idx].append((qfr.in_variable.n_type, qfr.bound_variable.n_type))
+
+        unconnected_chains[idx].append((qfr.bound_variable.n_type, qfr.bound_variable.n_type))
+
+        if not all(unconnected_chains[idx][c_idx][-1] == unconnected_chains[idx][c_idx + 1][0]
+                   for c_idx in range(len(unconnected_chains[idx]) - 1)):
+            return False
+
+    chain_1 = tuple([chain[0] for chain in unconnected_chains[0]])
+    chain_2 = tuple([chain[0] for chain in unconnected_chains[1]])
+
+    return chain_implies(chain_1, chain_2, graph)
+
+
+def get_quantifier_block(formula: language.Formula) -> List[language.QuantifiedFormula]:
+    if isinstance(formula, language.QuantifiedFormula):
+        return [formula] + get_quantifier_block(formula.inner_formula)
+
+    if isinstance(formula, language.NumericQuantifiedFormula):
+        return get_quantifier_block(formula.inner_formula)
+
+    return []
+
+
+def chain_implies(chain_1: Tuple[str, ...], chain_2: Tuple[str, ...], graph: gg.GrammarGraph) -> bool:
+    if len(chain_1) != len(chain_2):
+        return False
+
+    if chain_1[-1] != chain_2[-1]:
+        return False
+
+    chain_1_closure = nonterminal_chain_closure(chain_1, graph)
+    chain_2_closure = nonterminal_chain_closure(chain_2, graph)
+
+    for cl_chain_2 in chain_2_closure:
+        success = False
+        for cl_chain_1 in chain_1_closure:
+            if len(cl_chain_1) < len(cl_chain_2):
+                continue
+
+            if cl_chain_1 == cl_chain_2:
+                success = True
+                break
+
+            for idx in range(len(cl_chain_1) - len(cl_chain_2) + 1):
+                if cl_chain_1[idx:len(cl_chain_2) + idx] == cl_chain_2:
+                    success = True
+                    break
+
+            if success:
+                break
+
+        if not success:
+            # print(f"Failure: {cl_chain_2}")
+            return False
+
+    return True
+
+
+def nonterminal_chain_closure(
+        chain: Tuple[str, ...],
+        graph: gg.GrammarGraph,
+        max_num_cycles=0) -> Set[Tuple[str, ...]]:
+    closure: Set[Tuple[str, ...]] = {(chain[0],)}
+    for chain_elem in chain[1:]:
+        old_chain_1_closure = set(closure)
+        closure = set([])
+        for partial_chain in old_chain_1_closure:
+            closure.update({
+                partial_chain + path[1:]
+                for path in paths_between(graph, partial_chain[-1], chain_elem)})
+
+    return closure
 
 
 class PatternInstantiationFilter(ABC):
@@ -564,24 +704,16 @@ class StructuralPredicatesFilter(PatternInstantiationFilter):
 
 
 class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
-    def __init__(self, graph: gg.GrammarGraph, nonterminal_chains: Set[Tuple[str, ...]]):
+    def __init__(self, graph: gg.GrammarGraph, input_reachability_relation: Set[Tuple[str, str]]):
         super().__init__("Nonterminal String in `count` Predicates Filter")
         self.graph = graph
-        self.nonterminal_chains = nonterminal_chains
+        self.input_reachability_relation = input_reachability_relation
 
     def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         return reachable(self.graph, from_nonterminal, to_nonterminal)
 
     def reachable_in_inputs(self, from_nonterminal: str, to_nonterminal: str) -> bool:
-        from_nonterminal, to_nonterminal = to_nonterminal, from_nonterminal
-        return any(
-            from_nonterminal == nonterminal_1 and
-            to_nonterminal == nonterminal_2
-            for path in self.nonterminal_chains
-            for idx_1, nonterminal_1 in enumerate(path)
-            for idx_2, nonterminal_2 in enumerate(path)
-            if idx_1 < idx_2
-        )
+        return (from_nonterminal, to_nonterminal) in self.input_reachability_relation
 
     def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
         # In `count(elem, nonterminal, num)` occurrences

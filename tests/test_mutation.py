@@ -5,8 +5,11 @@ import unittest
 
 from fuzzingbook.Grammars import JSON_GRAMMAR
 from fuzzingbook.Parser import EarleyParser
+from isla.evaluator import evaluate
 from isla.fuzzer import GrammarCoverageFuzzer
 from isla.language import DerivationTree
+from isla_formalizations import scriptsizec
+from isla_formalizations.scriptsizec import compile_scriptsizec_clang
 
 from islearn.mutation import MutationFuzzer
 
@@ -32,6 +35,24 @@ class TestMutator(unittest.TestCase):
         for inp in mutation_fuzzer.run(extend_fragments=False):
             self.assertTrue(prop(inp))
             TestMutator.logger.info(str(inp))
+
+    def test_mutate_scriptsize_c(self):
+        def prop(tree: DerivationTree) -> bool:
+            return compile_scriptsizec_clang(tree) is True
+
+        raw_inputs = [
+            "{int c;c < 0;}",
+            "{17 < 0;}",
+        ]
+        inputs = [
+            DerivationTree.from_parse_tree(
+                next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
+            for inp in raw_inputs]
+
+        mutation_fuzzer = MutationFuzzer(scriptsizec.SCRIPTSIZE_C_GRAMMAR, inputs, prop, k=3)
+        for inp in mutation_fuzzer.run(num_iterations=50, alpha=.1):
+            self.assertTrue(prop(inp))
+            logging.getLogger(type(self).__name__).info(inp)
 
 
 if __name__ == '__main__':

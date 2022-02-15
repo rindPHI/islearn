@@ -1,3 +1,4 @@
+import logging
 import random
 from typing import Set, Dict, Callable, Tuple, Iterable, Generator
 
@@ -23,6 +24,7 @@ class MutationFuzzer:
             k: int = 3,
             min_mutations: int = 2,
             max_mutations: int = 10):
+        self.logger = logging.getLogger(type(self).__name__)
         self.grammar = grammar
         self.graph = gg.GrammarGraph.from_grammar(grammar)
         self.seed = set(seed)
@@ -38,6 +40,14 @@ class MutationFuzzer:
         self.fragments: Dict[str, Set[DerivationTree]] = {}
 
         self.reset()
+
+        self.mutators: Dict[Callable[[DerivationTree, Path], DerivationTree | None]] = {
+            self.replace_with_fragment: 4,
+            self.swap_subtrees: 3,
+            self.replace_with_random_subtree: 2,
+            self.generalize: 1,
+        }
+
 
     def reset(self):
         self.population = set(self.seed)
@@ -65,20 +75,24 @@ class MutationFuzzer:
                 mutations += 1
         return curr_inp
 
-    def mutate(self, inp: DerivationTree) -> DerivationTree:
-        while True:
-            path = random.choice([path for path, _ in inp.paths()])
-            if is_nonterminal(inp.get_subtree(path).value):
-                break
+    def mutate(self, inp: DerivationTree) -> DerivationTree | None:
+        paths = [path for path, subtree in inp.paths() if is_nonterminal(subtree.value)]
+        while paths:
+            path = random.choice(paths)
+            paths.remove(path)
 
-        mutator = random.choice([
-            lambda inp, path: self.replace_with_fragment(inp, path),
-            lambda inp, path: self.replace_with_random_subtree(inp, path),
-            lambda inp, path: self.generalize(inp, path),
-            lambda inp, path: self.swap_subtrees(inp, path),
-        ])
+            mutators = dict(self.mutators)
+            while mutators:
+                mutator = random.choices(
+                    list(mutators.keys()),
+                    list(mutators.values()), k=1)[0]
+                del mutators[mutator]
 
-        return mutator(inp, path)
+                result = mutator(inp, path)
+                if result:
+                    return result
+
+        return None
 
     def replace_with_fragment(self, inp: DerivationTree, path: Path) -> DerivationTree | None:
         subtree = inp.get_subtree(path)
@@ -158,7 +172,8 @@ class MutationFuzzer:
         unsuccessful_tries = 0
 
         for i in range(num_iterations):
-            if i * 10 > num_iterations and unsuccessful_tries / (i + 1) < alpha:
+            curr_alpha = 1 - (unsuccessful_tries / (i + 1))
+            if i * 10 > num_iterations and curr_alpha < alpha:
                 break
 
             inp = self.fuzz()
@@ -168,6 +183,7 @@ class MutationFuzzer:
                 unsuccessful_tries += 1
                 if yield_negative:
                     yield inp
+                self.logger.debug("current alpha: %f, threshold: %f", curr_alpha, alpha)
                 continue
 
             yield inp

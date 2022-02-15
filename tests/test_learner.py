@@ -1,51 +1,25 @@
 import copy
 import json
 import unittest
-from typing import cast
 
 from fuzzingbook.Grammars import JSON_GRAMMAR
 from fuzzingbook.Parser import EarleyParser
+from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv
 
-from islearn.learner import generate_candidates, patterns_from_file, learn_invariants
+from islearn.learner import generate_candidates, patterns_from_file, learn_invariants, chain_implies
 
 
 class TestLearner(unittest.TestCase):
-    def test_filter_invariants_simple_scriptsize_c(self):
-        pattern = """
-forall <?NONTERMINAL> use_ctx in start:
-  forall <?NONTERMINAL> use in use_ctx:
-    exists <?NONTERMINAL> def_ctx in start:
-      exists <?NONTERMINAL> def in def_ctx:
-        (before(def_ctx, use_ctx) and
-        (= def use))"""
-
-        raw_inputs = [
-            "{int c;c < 0;}",
-            "{17 < 0;}",
-        ]
-        inputs = [
-            language.DerivationTree.from_parse_tree(
-                next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
-            for inp in raw_inputs]
-
-        candidates = generate_candidates([pattern], inputs, scriptsizec.SCRIPTSIZE_C_GRAMMAR)
-        result = [candidate for candidate in candidates
-                  if all(evaluate(candidate, inp, scriptsizec.SCRIPTSIZE_C_GRAMMAR)
-                         for inp in inputs)]
-        # print("\n\n".join(map(lambda f: ISLaUnparser(f).unparse(), result)))
-
-        self.assertEqual(8, len(result))
-        for formula in result:
-            vars = {var.name: var for var in language.VariablesCollector.collect(formula)}
-            self.assertIn(vars["use_ctx"].n_type, ["<expr>", "<test>", "<sum>", "<term>"])
-            self.assertEqual("<id>", vars["use"].n_type)
-            self.assertIn(vars["def_ctx"].n_type, ["<block_statement>", "<declaration>"])
-            self.assertEqual("<id>", vars["def"].n_type)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.json_grammar = copy.deepcopy(JSON_GRAMMAR)
+        self.json_grammar["<value>"] = ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"]
+        self.json_grammar["<int>"] = ["<digit>", "<onenine><digits>", "-<digit>", "-<onenine><digits>"]
 
     def test_learn_invariants_simple_scriptsize_c(self):
         correct_property = """
@@ -57,7 +31,7 @@ forall <expr> use_ctx in start:
         (= def use))"""
 
         def prop(tree: language.DerivationTree) -> bool:
-            return evaluate(correct_property, tree, scriptsizec.SCRIPTSIZE_C_GRAMMAR).is_true()
+            return scriptsizec.compile_scriptsizec_clang(tree) is True
 
         raw_inputs = [
             "{int c;c < 0;}",
@@ -75,8 +49,8 @@ forall <expr> use_ctx in start:
             positive_examples=inputs
         )
 
-        # print(len(result))
-        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             correct_property.strip(),
@@ -133,23 +107,12 @@ exists int num:
             activated_patterns={"Equal Count"},
         )
 
-        # print(len(result))
-        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             parse_isla(correct_property, csv.CSV_GRAMMAR, semantic_predicates=STANDARD_SEMANTIC_PREDICATES),
             result)
-
-        for formula in result:
-            vars = {var.name: var for var in language.VariablesCollector.collect(formula)}
-            self.assertIn(vars["elem"].n_type, {"<csv-record>", "<csv-file>", "<csv-header>"})
-
-            needle_values = {
-                cast(language.SemanticPredicateFormula, f).args[1]
-                for f in
-                language.FilterVisitor(lambda f: isinstance(f, language.SemanticPredicateFormula)).collect(formula)}
-            for needle in needle_values:
-                self.assertIn(needle, {"<csv-string-list>", "<raw-field>", "<csv-record>", "<csv-record-1>"})
 
         perfect_precision_formulas = [f for f, p in result.items() if p == 1]
         self.assertEqual(2, len(perfect_precision_formulas))
@@ -157,37 +120,71 @@ exists int num:
 
     def test_string_existence(self):
         correct_property = """
-forall <object> container in start:
-  exists <member> inner_container in container:
-    exists <string> elem in inner_container:
-      (= elem \"""key""\")
+forall <json> container in start:
+  exists <string> elem in container:
+    (= elem \"""key""\")
 """
-
-        grammar = copy.deepcopy(JSON_GRAMMAR)
-        grammar["<value>"] = ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"]
-        grammar["<int>"] = ["<digit>", "<onenine><digits>", "-<digit>", "-<onenine><digits>"]
 
         def prop(tree: language.DerivationTree) -> bool:
             json_obj = json.loads(str(tree))
             return isinstance(json_obj, dict) and "key" in json_obj
 
-        inputs = [' { "key" : 13 } ']
-        trees = [language.DerivationTree.from_parse_tree(next(EarleyParser(grammar).parse(inp)))
+        inputs = [
+            ' { "key" : 13 } ',
+            # ' { "asdf" : [ 26 ] , "key" : "x" } ',
+        ]
+        trees = [language.DerivationTree.from_parse_tree(next(EarleyParser(self.json_grammar).parse(inp)))
                  for inp in inputs]
 
-        self.assertTrue(all(evaluate(correct_property, tree, grammar) for tree in trees))
+        # candidates = generate_candidates(
+        #     [patterns_from_file()["String Existence"]],
+        #     trees,
+        #     self.json_grammar
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
+
+        self.assertTrue(all(evaluate(correct_property, tree, self.json_grammar) for tree in trees))
 
         result = learn_invariants(
-            grammar,
+            self.json_grammar,
             prop,
             activated_patterns={"String Existence"},
             positive_examples=trees
         )
 
         # print(len(result))
-        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
-        self.assertIn(correct_property.strip(), list(map(lambda f: ISLaUnparser(f).unparse(), result)))
+        self.assertIn(
+            correct_property.strip(),
+            list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p == 1.0])))
+
+    def test_chain_implies(self):
+        graph = gg.GrammarGraph.from_grammar(self.json_grammar)
+
+        chain_1 = ("<json>", "<array>", "<digits>")
+        chain_2 = ("<json>", "<object>", "<digits>")
+        self.assertFalse(chain_implies(chain_1, chain_2, graph))
+        self.assertFalse(chain_implies(chain_2, chain_1, graph))
+
+        chain_1 = ("<json>", "<int>", "<digit>")
+        chain_2 = ("<element>", "<int>", "<digit>")
+        self.assertTrue(chain_implies(chain_1, chain_2, graph))
+        self.assertFalse(chain_implies(chain_2, chain_1, graph))
+
+        chain_1 = ("<json>", "<number>", "<digits>")
+        chain_2 = ("<member>", "<members>", "<digits>")
+        self.assertFalse(chain_implies(chain_1, chain_2, graph))
+        self.assertFalse(chain_implies(chain_2, chain_1, graph))
+
+        chain_1 = ("<json>", "<array>", "<string>")
+        chain_2 = ("<json>", "<object>", "<string>")
+        self.assertFalse(chain_implies(chain_1, chain_2, graph))
+        self.assertFalse(chain_implies(chain_2, chain_1, graph))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()
