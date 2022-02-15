@@ -37,8 +37,19 @@ class TestMutator(unittest.TestCase):
             TestMutator.logger.info(str(inp))
 
     def test_mutate_scriptsize_c(self):
+        correct_property = """
+        forall <expr> use_ctx in start:
+          forall <id> use in use_ctx:
+            exists <declaration> def_ctx in start:
+              exists <id> def in def_ctx:
+                (before(def_ctx, use_ctx) and
+                (= def use))"""
+
         def prop(tree: DerivationTree) -> bool:
-            return compile_scriptsizec_clang(tree) is True
+            return evaluate(correct_property, tree, scriptsizec.SCRIPTSIZE_C_GRAMMAR).is_true()
+
+        # def prop(tree: DerivationTree) -> bool:
+        #     return compile_scriptsizec_clang(tree) is True
 
         raw_inputs = [
             "{int c;c < 0;}",

@@ -10,7 +10,7 @@ from isla import language
 from isla.helpers import get_symbols
 from isla.isla_predicates import STANDARD_STRUCTURAL_PREDICATES, STANDARD_SEMANTIC_PREDICATES
 from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, VariableManager, Variable, Formula, \
-    parse_tree_text, antlr_get_text_with_whitespace
+    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser
 from isla.type_defs import Grammar
 
 from islearn.isla_language.IslaLanguageLexer import IslaLanguageLexer
@@ -163,7 +163,7 @@ def parse_abstract_isla(
     return isla_emitter.result
 
 
-class AbstractISLaUnparser(language.ISLaUnparser):
+class AbstractISLaUnparser(ISLaUnparser):
     def __init__(self, formula: Formula, indent="  "):
         super().__init__(formula, indent)
 
