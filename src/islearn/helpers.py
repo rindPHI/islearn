@@ -1,14 +1,8 @@
 import itertools
-import math
 from functools import reduce
 from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict, Sequence
 
 import isla.language
-import z3
-from fuzzingbook.Parser import canonical
-from isla.helpers import is_nonterminal, dict_of_lists_to_list_of_dicts
-from isla.language import DerivationTree
-from isla.type_defs import Path, Grammar
 from pathos import multiprocessing as pmp
 
 S = TypeVar("S")
@@ -133,11 +127,11 @@ def non_consecutive_ordered_sub_sequences(sequence: Iterable[T], length: int) ->
 def all_interleavings(a: Sequence[S], b: Sequence[T]) -> List[List[S | T]]:
     slots = [None] * (len(a) + len(b))
     for splice in itertools.combinations(range(0, len(slots)), len(b)):
-        it_B = iter(b)
+        it_b = iter(b)
         for s in splice:
-            slots[s] = next(it_B)
-        it_A = iter(a)
-        slots = [e if e else next(it_A) for e in slots]
+            slots[s] = next(it_b)
+        it_a = iter(a)
+        slots = [e if e else next(it_a) for e in slots]
         yield slots
         slots = [None] * (len(slots))
 
@@ -227,41 +221,3 @@ def replace_formula_by_formulas(
     return {in_formula}
 
 
-def expand_tree(
-        tree: DerivationTree,
-        grammar: Grammar,
-        limit: Optional[int] = None) -> List[DerivationTree]:
-    canonical_grammar = canonical(grammar)
-
-    nonterminal_expansions = {
-        leaf_path: [
-            [DerivationTree(child, None if is_nonterminal(child) else [], precompute_is_open=False)
-             for child in expansion]
-            for expansion in canonical_grammar[leaf_node.value]
-        ]
-        for leaf_path, leaf_node in tree.open_leaves()
-    }
-
-    possible_expansions: List[Dict[Path, List[DerivationTree]]] = \
-        dict_of_lists_to_list_of_dicts(nonterminal_expansions)
-
-    assert len(possible_expansions) == math.prod(len(values) for values in nonterminal_expansions.values())
-
-    if len(possible_expansions) == 1 and not possible_expansions[0]:
-        return []
-
-    if limit:
-        possible_expansions = possible_expansions[:limit]
-
-    result: List[DerivationTree] = []
-    for possible_expansion in possible_expansions:
-        expanded_tree = tree
-        for path, new_children in possible_expansion.items():
-            leaf_node = expanded_tree.get_subtree(path)
-            expanded_tree = expanded_tree.replace_path(
-                path, DerivationTree(leaf_node.value, new_children, leaf_node.id, precompute_is_open=False))
-
-        result.append(expanded_tree)
-
-    assert not limit or len(result) <= limit
-    return result

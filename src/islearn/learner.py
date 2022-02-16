@@ -14,17 +14,18 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
-from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, nonterminals, RE_NONTERMINAL
+from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
-from isla.type_defs import Grammar
+from isla.type_defs import Grammar, ParseTree
 from pathos import multiprocessing as pmp
 
-from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, expand_tree
-from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
-    parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser, MexprPlaceholderVariable, \
-    AbstractBindExpression
+from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure
+from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree
+from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
+    NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
+    AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
 from islearn.mutation import MutationFuzzer
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
@@ -115,9 +116,9 @@ def learn_invariants(
     candidates = generate_candidates(patterns, positive_examples_for_learning, grammar)
     logger.info("Found %d invariant candidates.", len(candidates))
 
-    logger.debug(
-        "Candidates:\n%s",
-        "\n\n".join([language.ISLaUnparser(candidate).unparse() for candidate in candidates]))
+    # logger.debug(
+    #     "Candidates:\n%s",
+    #     "\n\n".join([language.ISLaUnparser(candidate).unparse() for candidate in candidates]))
 
     logger.info("Filtering invariants.")
 
@@ -421,14 +422,15 @@ def instantiate_mexpr_placeholders(
             nonterminal_types = [var.n_type for var in mexpr_ph.variables]
             # We have to collect abstract instantiation of `qfd_formula_w_mexpr_phs.bound_variable`'s type
             # containing `nonterminal_types` in the given order.
-            candidate_trees = [language.DerivationTree(qfd_formula_w_mexpr_phs.bound_variable.n_type, None)]
+
+            candidate_trees: List[ParseTree] = [(qfd_formula_w_mexpr_phs.bound_variable.n_type, None)]
             i = 0
             while candidate_trees and i <= expansion_limit:
                 i += 1
                 tree = candidate_trees.pop(0)
 
                 nonterminal_occurrences = [
-                    [path for path, _ in tree.filter(lambda t: t.value == ntype)]
+                    [path for path, _ in filter_tree(tree, lambda t: t[0] == ntype)]
                     for ntype in nonterminal_types]
 
                 if all(occ for occ in nonterminal_occurrences):
@@ -445,9 +447,10 @@ def instantiate_mexpr_placeholders(
                         bind_expr_tree = tree
                         for idx, path in enumerate(matching_seq):
                             ntype = nonterminal_types[idx]
-                            bind_expr_tree = bind_expr_tree.replace_path(
+                            bind_expr_tree = replace_path(
+                                bind_expr_tree,
                                 path,
-                                language.DerivationTree(ntype.replace(">", f"-{hash((ntype, idx))}>"), None))
+                                (ntype.replace(">", f"-{hash((ntype, idx))}>"), None))
 
                         def replace_with_var(elem: str) -> str | language.Variable:
                             try:
@@ -458,7 +461,7 @@ def instantiate_mexpr_placeholders(
 
                         mexpr_elements = [
                             replace_with_var(token)
-                            for token in re.split(RE_NONTERMINAL, bind_expr_tree.to_string(show_open_leaves=True))
+                            for token in re.split(RE_NONTERMINAL, tree_to_string(bind_expr_tree, show_open_leaves=True))
                             if token]
 
                         constructor = (
@@ -472,9 +475,6 @@ def instantiate_mexpr_placeholders(
                             language.BindExpression(*mexpr_elements))
 
                         stack.append(language.replace_formula(pattern, qfd_formula_w_mexpr_phs, new_formula))
-
-                    # if matching_seqs:
-                    #     continue
 
                 candidate_trees.extend(expand_tree(tree, grammar))
 
@@ -594,38 +594,6 @@ def instantiate_string_placeholders(
         result.update(replace_formula_by_formulas(inst_pattern, replace_placeholder_by_string))
 
     return result
-
-
-def formula_structurally_implies(
-        formula_1: language.Formula, formula_2: language.Formula, graph: gg.GrammarGraph) -> bool:
-    """
-    This predicate holds true if both formula_1 and formula_2 are quantified formulas of the same structure
-    starting with a quantifier block, and the elements addressed by the second quantifier are a subset of
-    the elements addressed by the first quantifier.
-    """
-
-    qfr_block_1 = get_quantifier_block(formula_1)
-    qfr_block_2 = get_quantifier_block(formula_2)
-
-    if (len(qfr_block_1) != len(qfr_block_2) or
-            any(not isinstance(qfr_block_1[idx], type(qfr_block_2[idx])) for idx in range(len(qfr_block_1)))):
-        return False
-
-    unconnected_chains: Tuple[List[Tuple[str, str]], List[Tuple[str, str]]] = ([], [])
-    for idx, qfr_block in enumerate([qfr_block_1, qfr_block_2]):
-        for qfr in qfr_block:
-            unconnected_chains[idx].append((qfr.in_variable.n_type, qfr.bound_variable.n_type))
-
-        unconnected_chains[idx].append((qfr.bound_variable.n_type, qfr.bound_variable.n_type))
-
-        if not all(unconnected_chains[idx][c_idx][-1] == unconnected_chains[idx][c_idx + 1][0]
-                   for c_idx in range(len(unconnected_chains[idx]) - 1)):
-            return False
-
-    chain_1 = tuple([chain[0] for chain in unconnected_chains[0]])
-    chain_2 = tuple([chain[0] for chain in unconnected_chains[1]])
-
-    return chain_implies(chain_1, chain_2, graph)
 
 
 def get_quantifier_block(formula: language.Formula) -> List[language.QuantifiedFormula]:

@@ -104,7 +104,7 @@ forall <?NONTERMINAL> use_ctx in start:
 
     def test_learn_invariants_mexpr_xml(self):
         correct_property = """
-forall <?NONTERMINAL> container="{<?MATCHEXPR(opid, clid)>}" in start:
+forall <xml-tree> container="<{<id> opid}><text></{<id> clid}>" in start:
   (= opid clid)"""
 
         def prop(tree: language.DerivationTree) -> bool:
