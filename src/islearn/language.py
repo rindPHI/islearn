@@ -1,7 +1,7 @@
 import re
 from abc import ABC
 from dataclasses import dataclass
-from typing import Set, Optional, Callable, List, Tuple, cast
+from typing import Set, Optional, Callable, List, Tuple, cast, Dict, Union
 
 import antlr4
 import z3
@@ -53,11 +53,47 @@ class StringPlaceholderVariable(PlaceholderVariable):
 @dataclass(frozen=True, init=True)
 class MexprPlaceholderVariable(PlaceholderVariable):
     name: str
-    variables: Tuple[NonterminalPlaceholderVariable]
+    variables: Tuple[Variable]
     n_type: str = MEXPR_PLACEHOLDER
+
+    def substitute_variables(self, subst_map: Dict[Variable, Variable]) -> 'MexprPlaceholderVariable':
+        return MexprPlaceholderVariable(
+            self.name,
+            tuple([cast(Variable, subst_map.get(var, var)) for var in self.variables])
+        )
 
     def __str__(self):
         return MEXPR_PLACEHOLDER[:-1] + "(" + ", ".join(map(str, self.variables)) + ")>"
+
+
+class AbstractBindExpression(language.BindExpression):
+    def __init__(self, *bound_elements: MexprPlaceholderVariable | str | language.BoundVariable | List[str]):
+        super().__init__(*bound_elements)
+        assert sum(bool(isinstance(elem, MexprPlaceholderVariable)) for elem in bound_elements) <= 1
+
+        # Below assignment is for type checking reasons only
+        self.bound_elements: List[
+            MexprPlaceholderVariable |
+            language.BoundVariable |
+            List[language.BoundVariable]] = self.bound_elements
+
+    def substitute_variables(self, subst_map: Dict[Variable, Variable]) -> 'AbstractBindExpression':
+        return AbstractBindExpression(
+            *[elem if isinstance(elem, list)
+              else (
+                elem.substitute_variables(subst_map)
+                if isinstance(elem, MexprPlaceholderVariable)
+                else subst_map.get(elem, elem))
+              for elem in self.bound_elements])
+
+    def __str__(self):
+        return ''.join(map(
+            lambda e: f'{str(e)}'
+            if isinstance(e, str)
+            else ("[" + "".join(map(str, e)) + "]") if isinstance(e, list)
+            else (f"{{{'' if isinstance(e, MexprPlaceholderVariable) else e.n_type + ' '}{str(e)}}}"
+                  if not isinstance(e, language.DummyVariable)
+                  else (str(e))), self.bound_elements))
 
 
 class AbstractVariableManager(VariableManager):
@@ -169,7 +205,7 @@ class AbstractISLaEmitter(ISLaEmitter):
         parser._errHandler = BailPrintErrorStrategy()
         mexpr_emitter = AbstractMExprEmitter(mgr)
         antlr4.ParseTreeWalker().walk(mexpr_emitter, parser.matchExpr())
-        return language.BindExpression(*mexpr_emitter.result)
+        return AbstractBindExpression(*mexpr_emitter.result)
 
 
 class AbstractMExprEmitter(MExprEmitter, MexprParserListener.MexprParserListener):
@@ -207,20 +243,6 @@ def parse_abstract_isla(
 class AbstractISLaUnparser(ISLaUnparser):
     def __init__(self, formula: Formula, indent="  "):
         super().__init__(formula, indent)
-
-    def _unparse_match_expr(self, match_expr: language.BindExpression | None) -> str:
-        if match_expr is None:
-            return ""
-
-        result = ''.join(map(
-            lambda e: f'{str(e)}'
-            if isinstance(e, str)
-            else ("[" + "".join(map(str, e)) + "]") if isinstance(e, list)
-            else (f"{{{'' if isinstance(e, MexprPlaceholderVariable) else e.n_type + ' '}{str(e)}}}"
-                  if not isinstance(e, language.DummyVariable)
-                  else (str(e))), match_expr.bound_elements))
-
-        return f'="{result}"'
 
     def _unparse_smt_formula(self, formula: language.SMTFormula):
         result = formula.formula.sexpr()

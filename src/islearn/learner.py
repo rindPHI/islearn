@@ -4,8 +4,9 @@ import itertools
 import logging
 import os.path
 import pkgutil
+import re
 from abc import ABC
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
 
 import isla.fuzzer
 import z3
@@ -13,18 +14,17 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
-from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, is_nonterminal
-from isla.isla_predicates import reachable
-from isla.language import set_smt_auto_eval, ISLaUnparser
+from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, nonterminals, RE_NONTERMINAL
+from isla.isla_predicates import reachable, is_before
+from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
 from isla.type_defs import Grammar
-from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
-from islearn.helpers import parallel_all, connected_chains, non_consecutive_ordered_sub_sequences, \
-    replace_formula_by_formulas, transitive_closure
+from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, expand_tree
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, NonterminalStringPlaceholderVariable, \
-    parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser
+    parse_abstract_isla, StringPlaceholderVariable, AbstractISLaUnparser, MexprPlaceholderVariable, \
+    AbstractBindExpression
 from islearn.mutation import MutationFuzzer
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
@@ -96,13 +96,13 @@ def learn_invariants(
     )
 
     graph = gg.GrammarGraph.from_grammar(grammar)
-    positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k, prefer_small=True)
+    positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k)
     positive_examples_for_learning = filter_inputs_by_paths(positive_examples, graph, max_cnt=7, k=k, prefer_small=True)
     negative_examples = filter_inputs_by_paths(negative_examples, graph, max_cnt=10, k=k, prefer_small=True)
 
-    # logger.debug(
-    #     "Examples for learning:\n%s",
-    #     "\n".join(map(str, positive_examples_for_learning)))
+    logger.debug(
+        "Examples for learning:\n%s",
+        "\n".join(map(str, positive_examples_for_learning)))
 
     logger.info(
         "Reduced positive / negative samples to subsets of %d / %d samples based on k-path coverage, "
@@ -114,6 +114,10 @@ def learn_invariants(
 
     candidates = generate_candidates(patterns, positive_examples_for_learning, grammar)
     logger.info("Found %d invariant candidates.", len(candidates))
+
+    logger.debug(
+        "Candidates:\n%s",
+        "\n\n".join([language.ISLaUnparser(candidate).unparse() for candidate in candidates]))
 
     logger.info("Filtering invariants.")
 
@@ -293,19 +297,26 @@ def generate_candidates(
         # Instantiate various placeholder variables:
         # 1. Nonterminal placeholders
         pattern_insts_without_nonterminal_placeholders = instantiate_nonterminal_placeholders(
-            pattern, input_reachability_relation, graph)
+            pattern, input_reachability_relation)
 
         logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
                      len(pattern_insts_without_nonterminal_placeholders))
 
-        # 2. Nonterminal-String placeholders
+        # 2. Match expression placeholders
+        pattern_insts_without_mexpr_placeholders = instantiate_mexpr_placeholders(
+            pattern_insts_without_nonterminal_placeholders, grammar)
+
+        logger.debug("Found %d instantiations of pattern after instantiating match expression placeholders",
+                     len(pattern_insts_without_mexpr_placeholders))
+
+        # 3. Nonterminal-String placeholders
         pattern_insts_without_nonterminal_string_placeholders = instantiate_nonterminal_string_placeholders(
-            grammar, pattern_insts_without_nonterminal_placeholders)
+            grammar, pattern_insts_without_mexpr_placeholders)
 
         logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
                      len(pattern_insts_without_nonterminal_string_placeholders))
 
-        # 3. String placeholders
+        # 4. String placeholders
         pattern_insts_without_string_placeholders = instantiate_string_placeholders(
             pattern_insts_without_nonterminal_string_placeholders, inputs, grammar)
 
@@ -335,8 +346,7 @@ def generate_candidates(
 
 def instantiate_nonterminal_placeholders(
         pattern: language.Formula,
-        input_reachability_relation: Set[Tuple[str, str]],
-        graph: gg.GrammarGraph) -> Set[language.Formula]:
+        input_reachability_relation: Set[Tuple[str, str]]) -> Set[language.Formula]:
     in_visitor = InVisitor()
     pattern.accept(in_visitor)
     variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
@@ -359,15 +369,6 @@ def instantiate_nonterminal_placeholders(
                 for (from_nonterminal, to_nonterminal) in input_reachability_relation
                 if from_nonterminal == partial_sequence[-1]})
 
-        nonredundant_nonterminal_sequences = {
-            seq for seq in nonterminal_sequences
-            if not any(
-                other_seq != seq and
-                chain_implies(tuple(reversed(other_seq)), tuple(reversed(seq)), graph)
-                for other_seq in nonterminal_sequences
-            )
-        }
-
         new_instantiations = [
             {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
              for idx, variable in enumerate(variable_chain[:-1])}
@@ -389,12 +390,95 @@ def instantiate_nonterminal_placeholders(
 
     return result
 
-    # nonredundant_result: Set[language.Formula] = {
-    #     f for f in result
-    #     if not any(other != f and formula_structurally_implies(other, f, graph) for other in result)
-    # }
-    #
-    # return nonredundant_result
+
+def instantiate_mexpr_placeholders(
+        inst_patterns: Set[language.Formula],
+        grammar: Grammar,
+        expansion_limit: int = 5) -> Set[language.Formula]:
+    def quantified_formulas_with_mexpr_phs(formula: language.Formula) -> Set[language.QuantifiedFormula]:
+        return cast(Set[language.QuantifiedFormula], set(language.FilterVisitor(
+            lambda f: (isinstance(f, language.QuantifiedFormula) and
+                       f.bind_expression is not None and
+                       isinstance(f.bind_expression, AbstractBindExpression) and
+                       isinstance(f.bind_expression.bound_elements[0], MexprPlaceholderVariable))).collect(formula)))
+
+    if not any(quantified_formulas_with_mexpr_phs(pattern) for pattern in inst_patterns):
+        return inst_patterns
+
+    result: Set[language.Formula] = set([])
+    stack: List[language.Formula] = list(inst_patterns)
+    while stack:
+        pattern = stack.pop()
+        qfd_formulas_with_mexpr_phs = quantified_formulas_with_mexpr_phs(pattern)
+        if not qfd_formulas_with_mexpr_phs:
+            result.add(pattern)
+            continue
+
+        for qfd_formula_w_mexpr_phs in qfd_formulas_with_mexpr_phs:
+            mexpr_ph: MexprPlaceholderVariable = cast(
+                AbstractBindExpression,
+                qfd_formula_w_mexpr_phs.bind_expression).bound_elements[0]
+            nonterminal_types = [var.n_type for var in mexpr_ph.variables]
+            # We have to collect abstract instantiation of `qfd_formula_w_mexpr_phs.bound_variable`'s type
+            # containing `nonterminal_types` in the given order.
+            candidate_trees = [language.DerivationTree(qfd_formula_w_mexpr_phs.bound_variable.n_type, None)]
+            i = 0
+            while candidate_trees and i <= expansion_limit:
+                i += 1
+                tree = candidate_trees.pop(0)
+
+                nonterminal_occurrences = [
+                    [path for path, _ in tree.filter(lambda t: t.value == ntype)]
+                    for ntype in nonterminal_types]
+
+                if all(occ for occ in nonterminal_occurrences):
+                    product = list(itertools.product(*nonterminal_occurrences))
+                    matching_seqs = [
+                        seq for seq in product
+                        if (list(seq) == sorted(seq) and
+                            all(is_before(None, seq[idx], seq[idx + 1]) for idx in range(len(seq) - 1)))]
+
+                    for matching_seq in matching_seqs:
+                        assert len(matching_seq) == len(nonterminal_types)
+
+                        # First, make sure that all occurrences are leaves
+                        bind_expr_tree = tree
+                        for idx, path in enumerate(matching_seq):
+                            ntype = nonterminal_types[idx]
+                            bind_expr_tree = bind_expr_tree.replace_path(
+                                path,
+                                language.DerivationTree(ntype.replace(">", f"-{hash((ntype, idx))}>"), None))
+
+                        def replace_with_var(elem: str) -> str | language.Variable:
+                            try:
+                                return next(var for idx, var in enumerate(mexpr_ph.variables)
+                                            if elem == var.n_type.replace(">", f"-{hash((var.n_type, idx))}>"))
+                            except StopIteration:
+                                return elem
+
+                        mexpr_elements = [
+                            replace_with_var(token)
+                            for token in re.split(RE_NONTERMINAL, bind_expr_tree.to_string(show_open_leaves=True))
+                            if token]
+
+                        constructor = (
+                            language.ForallFormula if isinstance(qfd_formula_w_mexpr_phs, language.ForallFormula)
+                            else language.ExistsFormula)
+
+                        new_formula = constructor(
+                            qfd_formula_w_mexpr_phs.bound_variable,
+                            qfd_formula_w_mexpr_phs.in_variable,
+                            qfd_formula_w_mexpr_phs.inner_formula,
+                            language.BindExpression(*mexpr_elements))
+
+                        stack.append(language.replace_formula(pattern, qfd_formula_w_mexpr_phs, new_formula))
+
+                    # if matching_seqs:
+                    #     continue
+
+                candidate_trees.extend(expand_tree(tree, grammar))
+
+    return result
 
 
 def instantiate_nonterminal_string_placeholders(
@@ -552,41 +636,6 @@ def get_quantifier_block(formula: language.Formula) -> List[language.QuantifiedF
         return get_quantifier_block(formula.inner_formula)
 
     return []
-
-
-def chain_implies(chain_1: Tuple[str, ...], chain_2: Tuple[str, ...], graph: gg.GrammarGraph) -> bool:
-    if len(chain_1) != len(chain_2):
-        return False
-
-    if chain_1[-1] != chain_2[-1]:
-        return False
-
-    chain_1_closure = nonterminal_chain_closure(chain_1, graph)
-    chain_2_closure = nonterminal_chain_closure(chain_2, graph)
-
-    for cl_chain_2 in chain_2_closure:
-        success = False
-        for cl_chain_1 in chain_1_closure:
-            if len(cl_chain_1) < len(cl_chain_2):
-                continue
-
-            if cl_chain_1 == cl_chain_2:
-                success = True
-                break
-
-            for idx in range(len(cl_chain_1) - len(cl_chain_2) + 1):
-                if cl_chain_1[idx:len(cl_chain_2) + idx] == cl_chain_2:
-                    success = True
-                    break
-
-            if success:
-                break
-
-        if not success:
-            # print(f"Failure: {cl_chain_2}")
-            return False
-
-    return True
 
 
 def nonterminal_chain_closure(
@@ -755,6 +804,15 @@ class InVisitor(language.FormulaVisitor):
 
     def handle(self, formula: language.QuantifiedFormula):
         self.result.add((formula.bound_variable, formula.in_variable))
+        if (formula.bind_expression and
+                any(isinstance(elem, MexprPlaceholderVariable)
+                    for elem in formula.bind_expression.bound_elements)):
+            phs = [elem for elem in formula.bind_expression.bound_elements
+                   if isinstance(elem, MexprPlaceholderVariable)]
+            assert len(phs) == 1
+            ph = cast(MexprPlaceholderVariable, phs[0])
+            for nonterminal_placeholder in ph.variables:
+                self.result.add((nonterminal_placeholder, formula.bound_variable))
 
 
 def get_placeholders(formula: language.Formula) -> Set[PlaceholderVariable]:

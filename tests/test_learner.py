@@ -4,14 +4,13 @@ import unittest
 
 from fuzzingbook.Grammars import JSON_GRAMMAR
 from fuzzingbook.Parser import EarleyParser
-from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
-from isla_formalizations import scriptsizec, csv
+from isla_formalizations import scriptsizec, csv, xml_lang
 
-from islearn.learner import generate_candidates, patterns_from_file, learn_invariants, chain_implies
+from islearn.learner import generate_candidates, patterns_from_file, learn_invariants
 
 
 class TestLearner(unittest.TestCase):
@@ -46,6 +45,97 @@ forall <expr> use_ctx in start:
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
             activated_patterns={"Def-Use 1"},
+            positive_examples=inputs
+        )
+
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+
+        self.assertIn(
+            correct_property.strip(),
+            map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
+
+    def test_learn_invariants_mexpr_scriptsize_c(self):
+        correct_property = """
+forall <?NONTERMINAL> use_ctx in start:
+  forall <?NONTERMINAL> use in use_ctx:
+    exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+      (before(def_ctx, use_ctx) and
+      (= use def))"""
+
+        def prop(tree: language.DerivationTree) -> bool:
+            return scriptsizec.compile_scriptsizec_clang(tree) is True
+
+        raw_inputs = [
+            "{int c;c < 0;}",
+            "{17 < 0;}",
+        ]
+        inputs = [
+            language.DerivationTree.from_parse_tree(
+                next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
+            for inp in raw_inputs]
+
+        ##########
+        candidates = generate_candidates(
+            [correct_property],
+            inputs,
+            scriptsizec.SCRIPTSIZE_C_GRAMMAR
+        )
+
+        print(len(candidates))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        return
+        ##########
+
+        result = learn_invariants(
+            scriptsizec.SCRIPTSIZE_C_GRAMMAR,
+            prop,
+            activated_patterns={"Def-Use 1"},
+            positive_examples=inputs
+        )
+
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+
+        self.assertIn(
+            correct_property.strip(),
+            map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
+
+    def test_learn_invariants_mexpr_xml(self):
+        correct_property = """
+forall <?NONTERMINAL> container="{<?MATCHEXPR(opid, clid)>}" in start:
+  (= opid clid)"""
+
+        def prop(tree: language.DerivationTree) -> bool:
+            return xml_lang.validate_xml(tree) is True
+
+        raw_inputs = [
+            "<a>asdf</a>",
+            "<b>xyz<c/><x>X</x></b>"
+        ]
+        inputs = [
+            language.DerivationTree.from_parse_tree(
+                next(EarleyParser(xml_lang.XML_GRAMMAR).parse(inp)))
+            for inp in raw_inputs]
+
+        ##########
+        # candidates = generate_candidates(
+        #     [correct_property],
+        #     inputs,
+        #     xml_lang.XML_GRAMMAR
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
+        ##########
+
+        result = learn_invariants(
+            xml_lang.XML_GRAMMAR,
+            prop,
+            activated_patterns={"Balance"},
             positive_examples=inputs
         )
 
@@ -162,29 +252,6 @@ forall <json> container in start:
         self.assertIn(
             correct_property.strip(),
             list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p == 1.0])))
-
-    def test_chain_implies(self):
-        graph = gg.GrammarGraph.from_grammar(self.json_grammar)
-
-        chain_1 = ("<json>", "<array>", "<digits>")
-        chain_2 = ("<json>", "<object>", "<digits>")
-        self.assertFalse(chain_implies(chain_1, chain_2, graph))
-        self.assertFalse(chain_implies(chain_2, chain_1, graph))
-
-        chain_1 = ("<json>", "<int>", "<digit>")
-        chain_2 = ("<element>", "<int>", "<digit>")
-        self.assertTrue(chain_implies(chain_1, chain_2, graph))
-        self.assertFalse(chain_implies(chain_2, chain_1, graph))
-
-        chain_1 = ("<json>", "<number>", "<digits>")
-        chain_2 = ("<member>", "<members>", "<digits>")
-        self.assertFalse(chain_implies(chain_1, chain_2, graph))
-        self.assertFalse(chain_implies(chain_2, chain_1, graph))
-
-        chain_1 = ("<json>", "<array>", "<string>")
-        chain_2 = ("<json>", "<object>", "<string>")
-        self.assertFalse(chain_implies(chain_1, chain_2, graph))
-        self.assertFalse(chain_implies(chain_2, chain_1, graph))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

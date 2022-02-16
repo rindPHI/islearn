@@ -17,6 +17,12 @@
             (before(def_ctx, use_ctx) and
             (= use def))
 
+- name: Balance
+  constraint: |
+      forall <?NONTERMINAL> container="{<?MATCHEXPR(opid, clid)>}" in start:
+        (= opid clid)
+
+
 - name: Equal Count
   constraint: |
       exists int num:
