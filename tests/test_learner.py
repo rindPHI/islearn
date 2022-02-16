@@ -112,7 +112,8 @@ forall <xml-tree> container="<{<id> opid}><text></{<id> clid}>" in start:
 
         raw_inputs = [
             "<a>asdf</a>",
-            "<b>xyz<c/><x>X</x></b>"
+            "<b>xyz<c/><x>X</x></b>",
+            "<a/>"
         ]
         inputs = [
             language.DerivationTree.from_parse_tree(
@@ -139,8 +140,8 @@ forall <xml-tree> container="<{<id> opid}><text></{<id> clid}>" in start:
             positive_examples=inputs
         )
 
-        print(len(result))
-        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        # print(len(result))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             correct_property.strip(),

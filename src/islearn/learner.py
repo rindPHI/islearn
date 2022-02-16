@@ -22,11 +22,11 @@ from isla.type_defs import Grammar, ParseTree
 from pathos import multiprocessing as pmp
 
 from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure
-from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
 from islearn.mutation import MutationFuzzer
+from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
 logger = logging.getLogger("learner")
