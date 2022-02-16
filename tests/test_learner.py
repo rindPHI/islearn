@@ -57,9 +57,9 @@ forall <expr> use_ctx in start:
 
     def test_learn_invariants_mexpr_scriptsize_c(self):
         correct_property = """
-forall <?NONTERMINAL> use_ctx in start:
-  forall <?NONTERMINAL> use in use_ctx:
-    exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+forall <expr> use_ctx in start:
+  forall <id> use in use_ctx:
+    exists <declaration> def_ctx="int {<id> def};" in start:
       (before(def_ctx, use_ctx) and
       (= use def))"""
 
@@ -76,22 +76,22 @@ forall <?NONTERMINAL> use_ctx in start:
             for inp in raw_inputs]
 
         ##########
-        candidates = generate_candidates(
-            [correct_property],
-            inputs,
-            scriptsizec.SCRIPTSIZE_C_GRAMMAR
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # candidates = generate_candidates(
+        #     patterns_from_file()["Def-Use 2"],
+        #     inputs,
+        #     scriptsizec.SCRIPTSIZE_C_GRAMMAR
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##########
 
         result = learn_invariants(
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
-            activated_patterns={"Def-Use 1"},
+            activated_patterns={"Def-Use 2"},
             positive_examples=inputs
         )
 
@@ -122,7 +122,7 @@ forall <xml-tree> container="<{<id> opid}><text></{<id> clid}>" in start:
 
         ##########
         # candidates = generate_candidates(
-        #     [correct_property],
+        #     patterns_from_file()["Balance"],
         #     inputs,
         #     xml_lang.XML_GRAMMAR
         # )
