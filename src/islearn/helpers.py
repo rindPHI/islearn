@@ -235,7 +235,7 @@ def expand_tree(
 
     nonterminal_expansions = {
         leaf_path: [
-            [DerivationTree(child, None if is_nonterminal(child) else [])
+            [DerivationTree(child, None if is_nonterminal(child) else [], precompute_is_open=False)
              for child in expansion]
             for expansion in canonical_grammar[leaf_node.value]
         ]
@@ -259,7 +259,7 @@ def expand_tree(
         for path, new_children in possible_expansion.items():
             leaf_node = expanded_tree.get_subtree(path)
             expanded_tree = expanded_tree.replace_path(
-                path, DerivationTree(leaf_node.value, new_children, leaf_node.id))
+                path, DerivationTree(leaf_node.value, new_children, leaf_node.id, precompute_is_open=False))
 
         result.append(expanded_tree)
 
