@@ -1,4 +1,5 @@
-- name: Def-Use
+- name: Def-Use 1
+  group: Def-Use
   constraint: |
       forall <?NONTERMINAL> use_ctx in start:
         forall <?NONTERMINAL> use in use_ctx:
@@ -6,6 +7,15 @@
             exists <?NONTERMINAL> def in def_ctx:
               (before(def_ctx, use_ctx) and
               (= def use))
+
+- name: Def-Use 2
+  group: Def-Use
+  constraint: |
+      forall <?NONTERMINAL> use_ctx in start:
+        forall <?NONTERMINAL> use in use_ctx:
+          exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+            (before(def_ctx, use_ctx) and
+            (= use def))
 
 - name: Equal Count
   constraint: |

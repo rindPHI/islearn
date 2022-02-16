@@ -45,7 +45,7 @@ forall <expr> use_ctx in start:
         result = learn_invariants(
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
-            activated_patterns={"Def-Use"},
+            activated_patterns={"Def-Use 1"},
             positive_examples=inputs
         )
 
@@ -191,6 +191,9 @@ forall <json> container in start:
         self.assertTrue(patterns)
         self.assertGreaterEqual(len(patterns), 2)
         self.assertIn("Def-Use", patterns)
+        self.assertIn("Def-Use 1", patterns)
+        self.assertIn("Def-Use 2", patterns)
+        self.assertNotIn("Def-Use 9", patterns)
 
 
 if __name__ == '__main__':

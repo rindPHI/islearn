@@ -5,7 +5,7 @@ import logging
 import os.path
 import pkgutil
 from abc import ABC
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
 
 import isla.fuzzer
 import z3
@@ -47,14 +47,13 @@ def learn_invariants(
     assert all(prop(example) for example in positive_examples)
     assert all(not prop(example) for example in negative_examples)
 
+    assert not activated_patterns or not deactivated_patterns
     if not patterns:
         pattern_repo = patterns_from_file(pattern_file or STANDARD_PATTERNS_REPO)
         if activated_patterns:
-            patterns = [pattern for name, pattern in pattern_repo.items() if name in activated_patterns]
-        elif deactivated_patterns:
-            patterns = [pattern for name, pattern in pattern_repo.items() if name not in deactivated_patterns]
+            patterns = [pattern for name in activated_patterns for pattern in pattern_repo[name]]
         else:
-            patterns = list(pattern_repo.values())
+            patterns = list(pattern_repo.get_all(but=deactivated_patterns or []))
     else:
         patterns = [
             pattern if isinstance(pattern, language.Formula)
@@ -778,7 +777,60 @@ def extract_top_level_constant(candidate):
          if isinstance(c, language.Constant) and not c.is_numeric()))
 
 
-def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> Dict[str, language.Formula]:
+class PatternRepository:
+    DEFAULT_GROUP = "default"
+
+    def __init__(self, data: List[Dict[str, str]]):
+        self.groups: Dict[str, Dict[str, language.Formula]] = {}
+        for entry in data:
+            name = entry["name"]
+            group = entry.get("group", PatternRepository.DEFAULT_GROUP)
+            constraint = parse_abstract_isla(entry["constraint"])
+            self.groups.setdefault(group, {})[name] = constraint
+
+    def __getitem__(self, item: str) -> Set[language.Formula]:
+        if item in self.groups:
+            return set(self.groups[item].values())
+
+        for elements in self.groups.values():
+            if item in elements:
+                return {elements[item]}
+
+        return set([])
+
+    def __contains__(self, item: str) -> bool:
+        return bool(self[item])
+
+    def __len__(self):
+        return sum([len(group.values()) for group in self.groups.values()])
+
+    def get_all(self, but: Iterable[str] = tuple()) -> Set[language.Formula]:
+        exclude: Set[language.Formula] = set([])
+        for excluded in but:
+            exclude.update(self[excluded])
+
+        all_patterns: Set[language.Formula] = set(
+            functools.reduce(set.__or__, [set(d.values()) for d in self.groups.values()]))
+
+        return all_patterns.intersection(exclude)
+
+    def __str__(self):
+        result = ""
+        for group in self.groups:
+            for name in self.groups[group]:
+                result += f"- name: {name}\n"
+                if group != PatternRepository.DEFAULT_GROUP:
+                    result += f"  group: {group}\n"
+                result += "  constraint: |\n"
+                constraint_str = AbstractISLaUnparser(self.groups[group][name]).unparse()
+                constraint_str = "\n".join(["      " + line for line in constraint_str.split("\n")])
+                result += constraint_str
+                result += "\n\n"
+
+        return result.strip()
+
+
+def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> PatternRepository:
     from yaml import load
     try:
         from yaml import CLoader as Loader
@@ -797,6 +849,4 @@ def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> Dict[str, lan
     assert len(data) > 0
     assert all(isinstance(entry, dict) for entry in data)
 
-    return {
-        entry["name"]: parse_abstract_isla(entry["constraint"])
-        for entry in data}
+    return PatternRepository(data)
