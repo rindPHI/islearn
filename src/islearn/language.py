@@ -28,13 +28,13 @@ class PlaceholderVariable(language.BoundVariable, ABC):
     pass
 
 
-@dataclass(frozen=True, init=True)
+@dataclass(frozen=True, eq=True, init=True)
 class NonterminalPlaceholderVariable(PlaceholderVariable):
     name: str
     n_type: str = NONTERMINAL_PLACEHOLDER
 
 
-@dataclass(frozen=True, init=True)
+@dataclass(frozen=True, eq=True, init=True)
 class NonterminalStringPlaceholderVariable(PlaceholderVariable):
     name: str
 
@@ -42,7 +42,7 @@ class NonterminalStringPlaceholderVariable(PlaceholderVariable):
         return NONTERMINAL_PLACEHOLDER
 
 
-@dataclass(frozen=True, init=True)
+@dataclass(frozen=True, eq=True, init=True)
 class StringPlaceholderVariable(PlaceholderVariable):
     name: str
 
@@ -50,7 +50,7 @@ class StringPlaceholderVariable(PlaceholderVariable):
         return STRING_PLACEHOLDER
 
 
-@dataclass(frozen=True, init=True)
+@dataclass(frozen=True, eq=True, init=True)
 class MexprPlaceholderVariable(PlaceholderVariable):
     name: str
     variables: Tuple[Variable]

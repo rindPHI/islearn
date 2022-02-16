@@ -26,7 +26,8 @@ from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
 from islearn.mutation import MutationFuzzer
-from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree
+from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree, tree_paths, tree_leaves, \
+    get_subtree
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
 logger = logging.getLogger("learner")
@@ -443,7 +444,7 @@ def instantiate_mexpr_placeholders(
                     for matching_seq in matching_seqs:
                         assert len(matching_seq) == len(nonterminal_types)
 
-                        # First, make sure that all occurrences are leaves
+                        # We change node labels to be able to correctly identify variable positions in the tree.
                         bind_expr_tree = tree
                         for idx, path in enumerate(matching_seq):
                             ntype = nonterminal_types[idx]
@@ -451,6 +452,31 @@ def instantiate_mexpr_placeholders(
                                 bind_expr_tree,
                                 path,
                                 (ntype.replace(">", f"-{hash((ntype, idx))}>"), None))
+
+                        # We prune too specific leaves of the tree: Each node that does not contain
+                        # a variable node as a child, and is an immediate child of a node containing
+                        # a variable node, is pruned away.
+                        non_var_paths = [path for path, _ in tree_leaves(bind_expr_tree)
+                                         if path not in matching_seq]
+
+                        for path in non_var_paths:
+                            if len(path) < 2:
+                                continue
+
+                            while len(path) > 1 and not any(
+                                    len(path[:-1]) < len(var_path) and
+                                    var_path[:len(path[:-1])] == path[:-1]
+                                    for var_path in matching_seq):
+                                path = path[:-1]
+
+                            if len(path) > 0 and not any(
+                                    len(path) < len(var_path) and
+                                    var_path[:len(path)] == path
+                                    for var_path in matching_seq):
+                                bind_expr_tree = replace_path(
+                                    bind_expr_tree,
+                                    path,
+                                    (get_subtree(bind_expr_tree, path)[0], None))
 
                         def replace_with_var(elem: str) -> str | language.Variable:
                             try:

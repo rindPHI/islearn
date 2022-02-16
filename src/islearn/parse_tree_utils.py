@@ -131,6 +131,10 @@ def open_leaves(tree: ParseTree) -> Generator[Tuple[Path, ParseTree], None, None
     return ((path, sub_tree) for path, sub_tree in tree_paths(tree) if sub_tree[1] is None)
 
 
+def tree_leaves(tree: ParseTree) -> Generator[Tuple[Path, ParseTree], None, None]:
+    return ((path, sub_tree) for path, sub_tree in tree_paths(tree) if not sub_tree[1])
+
+
 def expand_tree(
         tree: ParseTree,
         grammar: Grammar,
