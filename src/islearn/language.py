@@ -1,7 +1,7 @@
 import re
 from abc import ABC
 from dataclasses import dataclass
-from typing import Set, Optional, Callable, List
+from typing import Set, Optional, Callable, List, Tuple, cast
 
 import antlr4
 import z3
@@ -10,14 +10,18 @@ from isla import language
 from isla.helpers import get_symbols
 from isla.isla_predicates import STANDARD_STRUCTURAL_PREDICATES, STANDARD_SEMANTIC_PREDICATES
 from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, VariableManager, Variable, Formula, \
-    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser
+    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter
 from isla.type_defs import Grammar
 
 from islearn.isla_language.IslaLanguageLexer import IslaLanguageLexer
 from islearn.isla_language.IslaLanguageParser import IslaLanguageParser
+from islearn.mexpr_lexer.MexprLexer import MexprLexer
+from islearn.mexpr_parser import MexprParserListener
+from islearn.mexpr_parser.MexprParser import MexprParser
 
 NONTERMINAL_PLACEHOLDER = "<?NONTERMINAL>"
 STRING_PLACEHOLDER = "<?STRING>"
+MEXPR_PLACEHOLDER = "<?MATCHEXPR>"
 
 
 class PlaceholderVariable(language.BoundVariable, ABC):
@@ -44,6 +48,16 @@ class StringPlaceholderVariable(PlaceholderVariable):
 
     def __str__(self):
         return STRING_PLACEHOLDER
+
+
+@dataclass(frozen=True, init=True)
+class MexprPlaceholderVariable(PlaceholderVariable):
+    name: str
+    variables: Tuple[NonterminalPlaceholderVariable]
+    n_type: str = MEXPR_PLACEHOLDER
+
+    def __str__(self):
+        return MEXPR_PLACEHOLDER[:-1] + "(" + ", ".join(map(str, self.variables)) + ")>"
 
 
 class AbstractVariableManager(VariableManager):
@@ -144,6 +158,33 @@ class AbstractISLaEmitter(ISLaEmitter):
         free_vars = [self.get_var(str(s)) for s in get_symbols(z3_constr)]
         self.formulas[ctx] = language.SMTFormula(z3_constr, *free_vars)
 
+    def parse_mexpr(self, inp: str, mgr: VariableManager) -> language.BindExpression:
+        class BailPrintErrorStrategy(antlr4.BailErrorStrategy):
+            def recover(self, recognizer: antlr4.Parser, e: antlr4.RecognitionException):
+                recognizer._errHandler.reportError(recognizer, e)
+                super().recover(recognizer, e)
+
+        lexer = MexprLexer(InputStream(inp))
+        parser = MexprParser(antlr4.CommonTokenStream(lexer))
+        parser._errHandler = BailPrintErrorStrategy()
+        mexpr_emitter = AbstractMExprEmitter(mgr)
+        antlr4.ParseTreeWalker().walk(mexpr_emitter, parser.matchExpr())
+        return language.BindExpression(*mexpr_emitter.result)
+
+
+class AbstractMExprEmitter(MExprEmitter, MexprParserListener.MexprParserListener):
+    def __init__(self, mgr: AbstractVariableManager):
+        super().__init__(mgr)
+        self.mgr = mgr
+
+    def exitMatchExprPlaceholder(self, ctx: MexprParser.MatchExprPlaceholderContext):
+        ids = [parse_tree_text(id) for id in ctx.ID()]
+        phs = [cast(NonterminalPlaceholderVariable, self.mgr.bv(id, NONTERMINAL_PLACEHOLDER)) for id in ids]
+        name = self.mgr.fresh_name("mexprPlaceholder")
+        mexpr_placeholder = MexprPlaceholderVariable(name, tuple(phs))
+        self.mgr.variables.setdefault(name, mexpr_placeholder)
+        self.result.append(mexpr_placeholder)
+
 
 def parse_abstract_isla(
         inp: str,
@@ -166,6 +207,20 @@ def parse_abstract_isla(
 class AbstractISLaUnparser(ISLaUnparser):
     def __init__(self, formula: Formula, indent="  "):
         super().__init__(formula, indent)
+
+    def _unparse_match_expr(self, match_expr: language.BindExpression | None) -> str:
+        if match_expr is None:
+            return ""
+
+        result = ''.join(map(
+            lambda e: f'{str(e)}'
+            if isinstance(e, str)
+            else ("[" + "".join(map(str, e)) + "]") if isinstance(e, list)
+            else (f"{{{'' if isinstance(e, MexprPlaceholderVariable) else e.n_type + ' '}{str(e)}}}"
+                  if not isinstance(e, language.DummyVariable)
+                  else (str(e))), match_expr.bound_elements))
+
+        return f'="{result}"'
 
     def _unparse_smt_formula(self, formula: language.SMTFormula):
         result = formula.formula.sexpr()

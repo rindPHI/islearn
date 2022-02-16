@@ -19,7 +19,7 @@ def serializedATN():
         buf.write("\4\3\4\3\4\7\4m\n\4\f\4\16\4p\13\4\3\5\3\5\3\5\3\5\5\5")
         buf.write("v\n\5\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\3\6\6\6\u0082")
         buf.write("\n\6\r\6\16\6\u0083\3\6\3\6\5\6\u0088\n\6\3\7\3\7\3\7")
-        buf.write("\2\3\6\b\2\4\6\b\n\f\2\4\5\2\t\t\31\31\34#\4\2\24\24\30")
+        buf.write("\2\3\6\b\2\4\6\b\n\f\2\4\5\2\t\t\31\31\34#\4\2\24\24\27")
         buf.write("\32\2\u009e\2\17\3\2\2\2\4\23\3\2\2\2\6[\3\2\2\2\bu\3")
         buf.write("\2\2\2\n\u0087\3\2\2\2\f\u0089\3\2\2\2\16\20\5\4\3\2\17")
         buf.write("\16\3\2\2\2\17\20\3\2\2\2\20\21\3\2\2\2\21\22\5\6\4\2")
@@ -1262,7 +1262,7 @@ class IslaLanguageParser ( Parser ):
             self.enterOuterAlt(localctx, 1)
             self.state = 135
             _la = self._input.LA(1)
-            if not((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << IslaLanguageParser.T__17) | (1 << IslaLanguageParser.STRING) | (1 << IslaLanguageParser.ID) | (1 << IslaLanguageParser.INT))) != 0)):
+            if not((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << IslaLanguageParser.T__17) | (1 << IslaLanguageParser.T__20) | (1 << IslaLanguageParser.STRING) | (1 << IslaLanguageParser.ID) | (1 << IslaLanguageParser.INT))) != 0)):
                 self._errHandler.recoverInline(self)
             else:
                 self._errHandler.reportMatch(self)

@@ -7,17 +7,21 @@ import sys
 
 def serializedATN():
     with StringIO() as buf:
-        buf.write("\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3\r")
-        buf.write("\35\4\2\t\2\4\3\t\3\4\4\t\4\3\2\6\2\n\n\2\r\2\16\2\13")
-        buf.write("\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\5\3\27\n\3\3\4\3")
-        buf.write("\4\3\4\3\4\3\4\2\2\5\2\4\6\2\2\2\34\2\t\3\2\2\2\4\26\3")
-        buf.write("\2\2\2\6\30\3\2\2\2\b\n\5\4\3\2\t\b\3\2\2\2\n\13\3\2\2")
-        buf.write("\2\13\t\3\2\2\2\13\f\3\2\2\2\f\3\3\2\2\2\r\16\7\3\2\2")
-        buf.write("\16\17\5\6\4\2\17\20\7\b\2\2\20\21\7\7\2\2\21\27\3\2\2")
-        buf.write("\2\22\23\7\4\2\2\23\24\7\r\2\2\24\27\7\f\2\2\25\27\7\5")
-        buf.write("\2\2\26\r\3\2\2\2\26\22\3\2\2\2\26\25\3\2\2\2\27\5\3\2")
-        buf.write("\2\2\30\31\7\n\2\2\31\32\7\b\2\2\32\33\7\t\2\2\33\7\3")
-        buf.write("\2\2\2\4\13\26")
+        buf.write("\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3\20")
+        buf.write(")\4\2\t\2\4\3\t\3\4\4\t\4\3\2\6\2\n\n\2\r\2\16\2\13\3")
+        buf.write("\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\3\7\3\30\n\3\f\3")
+        buf.write("\16\3\33\13\3\3\3\3\3\3\3\3\3\3\3\3\3\5\3#\n\3\3\4\3\4")
+        buf.write("\3\4\3\4\3\4\2\2\5\2\4\6\2\2\2*\2\t\3\2\2\2\4\"\3\2\2")
+        buf.write("\2\6$\3\2\2\2\b\n\5\4\3\2\t\b\3\2\2\2\n\13\3\2\2\2\13")
+        buf.write("\t\3\2\2\2\13\f\3\2\2\2\f\3\3\2\2\2\r\16\7\3\2\2\16\17")
+        buf.write("\5\6\4\2\17\20\7\13\2\2\20\21\7\7\2\2\21#\3\2\2\2\22\23")
+        buf.write("\7\3\2\2\23\24\7\b\2\2\24\31\7\13\2\2\25\26\7\n\2\2\26")
+        buf.write("\30\7\13\2\2\27\25\3\2\2\2\30\33\3\2\2\2\31\27\3\2\2\2")
+        buf.write("\31\32\3\2\2\2\32\34\3\2\2\2\33\31\3\2\2\2\34\35\7\t\2")
+        buf.write("\2\35#\7\7\2\2\36\37\7\4\2\2\37 \7\20\2\2 #\7\17\2\2!")
+        buf.write("#\7\5\2\2\"\r\3\2\2\2\"\22\3\2\2\2\"\36\3\2\2\2\"!\3\2")
+        buf.write("\2\2#\5\3\2\2\2$%\7\r\2\2%&\7\13\2\2&\'\7\f\2\2\'\7\3")
+        buf.write("\2\2\2\5\13\31\"")
         return buf.getvalue()
 
 
@@ -32,10 +36,12 @@ class MexprParser ( Parser ):
     sharedContextCache = PredictionContextCache()
 
     literalNames = [ "<INVALID>", "'{'", "'['", "<INVALID>", "<INVALID>", 
-                     "'}'", "<INVALID>", "'>'", "'<'", "<INVALID>", "']'" ]
+                     "'}'", "'<?MATCHEXPR('", "')>'", "','", "<INVALID>", 
+                     "'>'", "'<'", "<INVALID>", "']'" ]
 
     symbolicNames = [ "<INVALID>", "BRAOP", "OPTOP", "TEXT", "NL", "BRACL", 
-                      "ID", "GT", "LT", "WS", "OPTCL", "OPTTXT" ]
+                      "PLACEHOLDER_OP", "PLACEHOLDER_CL", "COMMA", "ID", 
+                      "GT", "LT", "WS", "OPTCL", "OPTTXT" ]
 
     RULE_matchExpr = 0
     RULE_matchExprElement = 1
@@ -49,12 +55,15 @@ class MexprParser ( Parser ):
     TEXT=3
     NL=4
     BRACL=5
-    ID=6
-    GT=7
-    LT=8
-    WS=9
-    OPTCL=10
-    OPTTXT=11
+    PLACEHOLDER_OP=6
+    PLACEHOLDER_CL=7
+    COMMA=8
+    ID=9
+    GT=10
+    LT=11
+    WS=12
+    OPTCL=13
+    OPTTXT=14
 
     def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
         super().__init__(input, output)
@@ -199,16 +208,51 @@ class MexprParser ( Parser ):
                 listener.exitMatchExprVar(self)
 
 
+    class MatchExprPlaceholderContext(MatchExprElementContext):
+
+        def __init__(self, parser, ctx:ParserRuleContext): # actually a MexprParser.MatchExprElementContext
+            super().__init__(parser)
+            self.copyFrom(ctx)
+
+        def BRAOP(self):
+            return self.getToken(MexprParser.BRAOP, 0)
+        def PLACEHOLDER_OP(self):
+            return self.getToken(MexprParser.PLACEHOLDER_OP, 0)
+        def ID(self, i:int=None):
+            if i is None:
+                return self.getTokens(MexprParser.ID)
+            else:
+                return self.getToken(MexprParser.ID, i)
+        def PLACEHOLDER_CL(self):
+            return self.getToken(MexprParser.PLACEHOLDER_CL, 0)
+        def BRACL(self):
+            return self.getToken(MexprParser.BRACL, 0)
+        def COMMA(self, i:int=None):
+            if i is None:
+                return self.getTokens(MexprParser.COMMA)
+            else:
+                return self.getToken(MexprParser.COMMA, i)
+
+        def enterRule(self, listener:ParseTreeListener):
+            if hasattr( listener, "enterMatchExprPlaceholder" ):
+                listener.enterMatchExprPlaceholder(self)
+
+        def exitRule(self, listener:ParseTreeListener):
+            if hasattr( listener, "exitMatchExprPlaceholder" ):
+                listener.exitMatchExprPlaceholder(self)
+
+
 
     def matchExprElement(self):
 
         localctx = MexprParser.MatchExprElementContext(self, self._ctx, self.state)
         self.enterRule(localctx, 2, self.RULE_matchExprElement)
+        self._la = 0 # Token type
         try:
-            self.state = 20
+            self.state = 32
             self._errHandler.sync(self)
-            token = self._input.LA(1)
-            if token in [MexprParser.BRAOP]:
+            la_ = self._interp.adaptivePredict(self._input,2,self._ctx)
+            if la_ == 1:
                 localctx = MexprParser.MatchExprVarContext(self, localctx)
                 self.enterOuterAlt(localctx, 1)
                 self.state = 11
@@ -220,24 +264,52 @@ class MexprParser ( Parser ):
                 self.state = 14
                 self.match(MexprParser.BRACL)
                 pass
-            elif token in [MexprParser.OPTOP]:
-                localctx = MexprParser.MatchExprOptionalContext(self, localctx)
+
+            elif la_ == 2:
+                localctx = MexprParser.MatchExprPlaceholderContext(self, localctx)
                 self.enterOuterAlt(localctx, 2)
                 self.state = 16
-                self.match(MexprParser.OPTOP)
+                self.match(MexprParser.BRAOP)
                 self.state = 17
-                self.match(MexprParser.OPTTXT)
+                self.match(MexprParser.PLACEHOLDER_OP)
                 self.state = 18
+                self.match(MexprParser.ID)
+                self.state = 23
+                self._errHandler.sync(self)
+                _la = self._input.LA(1)
+                while _la==MexprParser.COMMA:
+                    self.state = 19
+                    self.match(MexprParser.COMMA)
+                    self.state = 20
+                    self.match(MexprParser.ID)
+                    self.state = 25
+                    self._errHandler.sync(self)
+                    _la = self._input.LA(1)
+
+                self.state = 26
+                self.match(MexprParser.PLACEHOLDER_CL)
+                self.state = 27
+                self.match(MexprParser.BRACL)
+                pass
+
+            elif la_ == 3:
+                localctx = MexprParser.MatchExprOptionalContext(self, localctx)
+                self.enterOuterAlt(localctx, 3)
+                self.state = 28
+                self.match(MexprParser.OPTOP)
+                self.state = 29
+                self.match(MexprParser.OPTTXT)
+                self.state = 30
                 self.match(MexprParser.OPTCL)
                 pass
-            elif token in [MexprParser.TEXT]:
+
+            elif la_ == 4:
                 localctx = MexprParser.MatchExprCharsContext(self, localctx)
-                self.enterOuterAlt(localctx, 3)
-                self.state = 19
+                self.enterOuterAlt(localctx, 4)
+                self.state = 31
                 self.match(MexprParser.TEXT)
                 pass
-            else:
-                raise NoViableAltException(self)
+
 
         except RecognitionException as re:
             localctx.exception = re
@@ -282,11 +354,11 @@ class MexprParser ( Parser ):
         self.enterRule(localctx, 4, self.RULE_varType)
         try:
             self.enterOuterAlt(localctx, 1)
-            self.state = 22
+            self.state = 34
             self.match(MexprParser.LT)
-            self.state = 23
+            self.state = 35
             self.match(MexprParser.ID)
-            self.state = 24
+            self.state = 36
             self.match(MexprParser.GT)
         except RecognitionException as re:
             localctx.exception = re

@@ -10,6 +10,9 @@ NL : '\n' + -> skip ;
 
 mode VAR_DECL;
 BRACL : '}' -> popMode ;
+PLACEHOLDER_OP : '<?MATCHEXPR(' ;
+PLACEHOLDER_CL : ')>' ;
+COMMA : ',' ;
 ID: ID_LETTER (ID_LETTER | DIGIT) * ;
 fragment ID_LETTER : 'a'..'z'|'A'..'Z' | [_\-.] ;
 fragment DIGIT : '0'..'9' ;

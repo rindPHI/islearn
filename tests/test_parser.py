@@ -39,6 +39,18 @@ forall <?NONTERMINAL> container in start:
 
         self.assertEqual(pattern.strip(), AbstractISLaUnparser(parse_abstract_isla(pattern, JSON_GRAMMAR)).unparse())
 
+    def test_schematic_match_expression(self):
+        pattern = """
+forall <?NONTERMINAL> use_ctx in start:
+  forall <?NONTERMINAL> use in use_ctx:
+    exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+      (before(def_ctx, use_ctx) and
+      (= use def))"""
+
+        self.assertEqual(
+            pattern.strip(),
+            AbstractISLaUnparser(parse_abstract_isla(pattern, scriptsizec.SCRIPTSIZE_C_GRAMMAR)).unparse())
+
 
 if __name__ == '__main__':
     unittest.main()
