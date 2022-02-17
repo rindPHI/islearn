@@ -10,6 +10,7 @@ from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
 
 import isla.fuzzer
 import z3
+from fuzzingbook.Parser import canonical
 from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate
@@ -18,7 +19,7 @@ from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
-from isla.type_defs import Grammar, ParseTree
+from isla.type_defs import Grammar, ParseTree, CanonicalGrammar
 from pathos import multiprocessing as pmp
 
 from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure
@@ -127,6 +128,7 @@ def learn_invariants(
     invariants = [
         candidate for candidate in candidates
         if parallel_all(lambda inp: evaluate(candidate, inp, grammar).is_true(), positive_examples)
+        # if all(evaluate(candidate, inp, grammar).is_true() for inp in positive_examples)
     ]
 
     logger.info("%d invariants remain after filtering.", len(invariants))
@@ -263,6 +265,7 @@ def generate_candidates(
         inputs: Iterable[language.DerivationTree],
         grammar: Grammar) -> Set[language.Formula]:
     graph = gg.GrammarGraph.from_grammar(grammar)
+    canonical_grammar = canonical(grammar)
 
     nonterminal_paths: Set[Tuple[str, ...]] = {
         tuple([inp.get_subtree(path[:idx]).value
@@ -306,7 +309,7 @@ def generate_candidates(
 
         # 2. Match expression placeholders
         pattern_insts_without_mexpr_placeholders = instantiate_mexpr_placeholders(
-            pattern_insts_without_nonterminal_placeholders, grammar)
+            pattern_insts_without_nonterminal_placeholders, canonical_grammar)
 
         logger.debug("Found %d instantiations of pattern after instantiating match expression placeholders",
                      len(pattern_insts_without_mexpr_placeholders))
@@ -395,7 +398,7 @@ def instantiate_nonterminal_placeholders(
 
 def instantiate_mexpr_placeholders(
         inst_patterns: Set[language.Formula],
-        grammar: Grammar,
+        canonical_grammar: CanonicalGrammar,
         expansion_limit: int = 5) -> Set[language.Formula]:
     def quantified_formulas_with_mexpr_phs(formula: language.Formula) -> Set[language.QuantifiedFormula]:
         return cast(Set[language.QuantifiedFormula], set(language.FilterVisitor(
@@ -502,7 +505,7 @@ def instantiate_mexpr_placeholders(
 
                         stack.append(language.replace_formula(pattern, qfd_formula_w_mexpr_phs, new_formula))
 
-                candidate_trees.extend(expand_tree(tree, grammar))
+                candidate_trees.extend(expand_tree(tree, canonical_grammar))
 
     return result
 

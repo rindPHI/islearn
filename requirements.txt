@@ -156,3 +156,5 @@ wsproto==1.0.0
 yapf==0.31.0
 z3-solver>=4.8.8.0
 zipp==3.6.0
+docutils>=0.18.1
+pytest-rerunfailures>=10.2

@@ -2,6 +2,7 @@ import copy
 import json
 import unittest
 
+import pytest
 from fuzzingbook.Grammars import JSON_GRAMMAR
 from fuzzingbook.Parser import EarleyParser
 from isla import language
@@ -20,6 +21,7 @@ class TestLearner(unittest.TestCase):
         self.json_grammar["<value>"] = ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"]
         self.json_grammar["<int>"] = ["<digit>", "<onenine><digits>", "-<digit>", "-<onenine><digits>"]
 
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_mexpr_scriptsize_c(self):
         correct_property = """
 forall <expr> use_ctx in start:
@@ -60,8 +62,8 @@ forall <expr> use_ctx in start:
             positive_examples=inputs
         )
 
-        print(len(result))
-        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        # print(len(result))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             correct_property.strip(),
@@ -117,9 +119,10 @@ forall <internal_reference> use_ctx in start:
             correct_property.strip(),
             map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
 
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_mexpr_xml(self):
         correct_property = """
-forall <xml-tree> container="<{<id> opid}><text></{<id> clid}>" in start:
+forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in start:
   (= opid clid)"""
 
         def prop(tree: language.DerivationTree) -> bool:
@@ -155,8 +158,8 @@ forall <xml-tree> container="<{<id> opid}><text></{<id> clid}>" in start:
             positive_examples=inputs
         )
 
-        # print(len(result))
-        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             correct_property.strip(),
@@ -274,9 +277,9 @@ forall <json> container in start:
         self.assertTrue(patterns)
         self.assertGreaterEqual(len(patterns), 2)
         self.assertIn("Def-Use", patterns)
-        self.assertIn("Def-Use 1", patterns)
-        self.assertIn("Def-Use 2", patterns)
-        self.assertNotIn("Def-Use 9", patterns)
+        self.assertIn("Def-Use (C / reST)", patterns)
+        self.assertIn("Def-Use (XML)", patterns)
+        self.assertNotIn("Def-Use (...)", patterns)
 
 
 if __name__ == '__main__':

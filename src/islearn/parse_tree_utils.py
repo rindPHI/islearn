@@ -3,7 +3,7 @@ from typing import List, Callable, Tuple, Generator, Optional, Dict
 
 from fuzzingbook.Parser import canonical
 from isla.helpers import is_nonterminal, dict_of_lists_to_list_of_dicts
-from isla.type_defs import ParseTree, Path, Grammar
+from isla.type_defs import ParseTree, Path, Grammar, CanonicalGrammar
 
 
 def get_subtree(tree: ParseTree, path: Path) -> ParseTree:
@@ -137,10 +137,8 @@ def tree_leaves(tree: ParseTree) -> Generator[Tuple[Path, ParseTree], None, None
 
 def expand_tree(
         tree: ParseTree,
-        grammar: Grammar,
+        canonical_grammar: CanonicalGrammar,
         limit: Optional[int] = None) -> List[ParseTree]:
-    canonical_grammar = canonical(grammar)
-
     nonterminal_expansions = {
         leaf_path: [
             [(child, None if is_nonterminal(child) else [])
