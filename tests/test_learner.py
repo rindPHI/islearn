@@ -11,7 +11,7 @@ from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 
-from islearn.learner import generate_candidates, patterns_from_file, learn_invariants
+from islearn.learner import patterns_from_file, InvariantLearner
 
 
 class TestLearner(unittest.TestCase):
@@ -55,12 +55,12 @@ forall <expr> use_ctx in start:
         # return
         ##########
 
-        result = learn_invariants(
+        result = InvariantLearner(
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
             activated_patterns={"Def-Use (C)"},
             positive_examples=inputs
-        )
+        ).learn_invariants()
 
         # print(len(result))
         # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
@@ -110,12 +110,12 @@ x
         # return
         ##########
 
-        result = learn_invariants(
+        result = InvariantLearner(
             rest.REST_GRAMMAR,
             prop,
             activated_patterns={"Def-Use (reST)"},
             positive_examples=inputs
-        )
+        ).learn_invariants()
 
         print(len(result))
         print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
@@ -156,12 +156,12 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
         # return
         ##########
 
-        result = learn_invariants(
+        result = InvariantLearner(
             xml_lang.XML_GRAMMAR,
             prop,
             activated_patterns={"Balance"},
             positive_examples=inputs
-        )
+        ).learn_invariants()
 
         print(len(result))
         print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
@@ -195,12 +195,15 @@ exists int num:
 """,
         ]
 
+        def prop(tree: language.DerivationTree) -> bool:
+            return evaluate(correct_property, tree, csv.CSV_GRAMMAR).is_true()
+
         inputs = [
             language.DerivationTree.from_parse_tree(
                 next(EarleyParser(csv.CSV_GRAMMAR).parse(inp)))
             for inp in raw_inputs]
 
-        candidates = generate_candidates([pattern], inputs, csv.CSV_GRAMMAR)
+        candidates = InvariantLearner(csv.CSV_GRAMMAR, prop, inputs).generate_candidates([pattern], inputs)
         # print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
         self.assertIn(correct_property.strip(), list(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
@@ -215,11 +218,11 @@ exists int num:
         def prop(tree: language.DerivationTree) -> bool:
             return evaluate(correct_property, tree, csv.CSV_GRAMMAR).is_true()
 
-        result = learn_invariants(
+        result = InvariantLearner(
             csv.CSV_GRAMMAR,
             prop,
             activated_patterns={"Equal Count"},
-        )
+        ).learn_invariants()
 
         print(len(result))
         print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
@@ -263,12 +266,12 @@ forall <json> container in start:
 
         self.assertTrue(all(evaluate(correct_property, tree, self.json_grammar) for tree in trees))
 
-        result = learn_invariants(
+        result = InvariantLearner(
             self.json_grammar,
             prop,
             activated_patterns={"String Existence"},
             positive_examples=trees
-        )
+        ).learn_invariants()
 
         # print(len(result))
         # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
