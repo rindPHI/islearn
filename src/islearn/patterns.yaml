@@ -1,14 +1,4 @@
-- name: Def-Use 1
-  group: Def-Use
-  constraint: |
-      forall <?NONTERMINAL> use_ctx in start:
-        forall <?NONTERMINAL> use in use_ctx:
-          exists <?NONTERMINAL> def_ctx in start:
-            exists <?NONTERMINAL> def in def_ctx:
-              (before(def_ctx, use_ctx) and
-              (= def use))
-
-- name: Def-Use 2
+- name: Def-Use (C / reST)
   group: Def-Use
   constraint: |
       forall <?NONTERMINAL> use_ctx in start:
@@ -17,21 +7,46 @@
             (before(def_ctx, use_ctx) and
             (= use def))
 
+- name: Def-Use (XML)
+  group: Def-Use
+  constraint: |
+      forall <?NONTERMINAL> attribute in start:
+        forall <?NONTERMINAL> prefix_id="{<?MATCHEXPR(prefix_use)>}" in attribute:
+          ((= prefix_use <?STRING>) or
+            exists <?NONTERMINAL> outer_tag="{<?MATCHEXPR(cont_attribute, contained_tree)>}" in start:
+              (inside(attribute, contained_tree) and 
+               exists <?NONTERMINAL> def_attribute="{<?MATCHEXPR(prefix_def)>}" in cont_attribute:
+                 (= prefix_use prefix_def)))
+
 - name: Balance
   constraint: |
-      forall <?NONTERMINAL> container="{<?MATCHEXPR(opid, clid)>}" in start:
-        (= opid clid)
-
+    forall <?NONTERMINAL> container="{<?MATCHEXPR(opid, clid)>}" in start:
+      (= opid clid)
 
 - name: Equal Count
   constraint: |
-      exists int num:
-        forall <?NONTERMINAL> elem in start:
-          ((>= (str.to.int num) 1) and
-          count(elem, <?NONTERMINAL>, num))
+    exists int num:
+      forall <?NONTERMINAL> elem in start:
+        ((>= (str.to.int num) 1) and
+        count(elem, <?NONTERMINAL>, num))
 
 - name: String Existence
+  group: Existential
   constraint: |
-      forall <?NONTERMINAL> container in start:
-        exists <?NONTERMINAL> elem in container:
-          (= elem <?STRING>)
+    forall <?NONTERMINAL> container in start:
+      exists <?NONTERMINAL> elem in container:
+        (= elem <?STRING>)
+
+- name: Length (Equality)
+  group: Existential
+  constraint: |
+    forall <?NONTERMINAL> container in start:
+      exists <?NONTERMINAL> elem in container:
+        (= (str.len elem) (str.to.int <?STRING>))
+
+- name: Length Upper Bound
+  group: Existential
+  constraint: |
+    forall <?NONTERMINAL> container in start:
+      exists <?NONTERMINAL> elem in container:
+        (<= (str.len elem) (str.to.int <?STRING>))

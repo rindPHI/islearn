@@ -397,7 +397,6 @@ def instantiate_mexpr_placeholders(
         inst_patterns: Set[language.Formula],
         grammar: Grammar,
         expansion_limit: int = 5) -> Set[language.Formula]:
-    # TODO: This seems to return multiple formulas of a similar shape for scriptsize-c! Some hash wrongly implemented?
     def quantified_formulas_with_mexpr_phs(formula: language.Formula) -> Set[language.QuantifiedFormula]:
         return cast(Set[language.QuantifiedFormula], set(language.FilterVisitor(
             lambda f: (isinstance(f, language.QuantifiedFormula) and

@@ -8,7 +8,7 @@ from isla import language
 from isla.evaluator import evaluate
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
-from isla_formalizations import scriptsizec, csv, xml_lang
+from isla_formalizations import scriptsizec, csv, xml_lang, rest
 
 from islearn.learner import generate_candidates, patterns_from_file, learn_invariants
 
@@ -19,41 +19,6 @@ class TestLearner(unittest.TestCase):
         self.json_grammar = copy.deepcopy(JSON_GRAMMAR)
         self.json_grammar["<value>"] = ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"]
         self.json_grammar["<int>"] = ["<digit>", "<onenine><digits>", "-<digit>", "-<onenine><digits>"]
-
-    def test_learn_invariants_simple_scriptsize_c(self):
-        correct_property = """
-forall <expr> use_ctx in start:
-  forall <id> use in use_ctx:
-    exists <declaration> def_ctx in start:
-      exists <id> def in def_ctx:
-        (before(def_ctx, use_ctx) and
-        (= def use))"""
-
-        def prop(tree: language.DerivationTree) -> bool:
-            return scriptsizec.compile_scriptsizec_clang(tree) is True
-
-        raw_inputs = [
-            "{int c;c < 0;}",
-            "{17 < 0;}",
-        ]
-        inputs = [
-            language.DerivationTree.from_parse_tree(
-                next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
-            for inp in raw_inputs]
-
-        result = learn_invariants(
-            scriptsizec.SCRIPTSIZE_C_GRAMMAR,
-            prop,
-            activated_patterns={"Def-Use 1"},
-            positive_examples=inputs
-        )
-
-        print(len(result))
-        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
-
-        self.assertIn(
-            correct_property.strip(),
-            map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
 
     def test_learn_invariants_mexpr_scriptsize_c(self):
         correct_property = """
@@ -77,7 +42,7 @@ forall <expr> use_ctx in start:
 
         ##########
         # candidates = generate_candidates(
-        #     patterns_from_file()["Def-Use 2"],
+        #     patterns_from_file()["Def-Use (C / reST)"],
         #     inputs,
         #     scriptsizec.SCRIPTSIZE_C_GRAMMAR
         # )
@@ -91,7 +56,57 @@ forall <expr> use_ctx in start:
         result = learn_invariants(
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
-            activated_patterns={"Def-Use 2"},
+            activated_patterns={"Def-Use (C / reST)"},
+            positive_examples=inputs
+        )
+
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+
+        self.assertIn(
+            correct_property.strip(),
+            map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
+
+    def test_learn_invariants_mexpr_rest(self):
+        # TODO: Inputs. Also, before is actually not true for reST!
+        #       Maybe add another pattern, but then also check implications
+        #       if both patterns are activated.
+        correct_property = """
+forall <internal_reference> use_ctx in start:
+  forall <id> use in ref:
+    exists <labeled_paragraph> def_ctx=".. _{<id> def}:\n\n<paragraph>" in start:
+      (before(def_ctx, use_ctx) and
+      (= use def))"""
+
+        def prop(tree: language.DerivationTree) -> bool:
+            return rest.render_rst(tree) is True
+
+        raw_inputs = [
+            "{int c;c < 0;}",
+            "{17 < 0;}",
+        ]
+        inputs = [
+            language.DerivationTree.from_parse_tree(
+                next(EarleyParser(rest.REST_GRAMMAR).parse(inp)))
+            for inp in raw_inputs]
+
+        ##########
+        # candidates = generate_candidates(
+        #     patterns_from_file()["Def-Use (C / reST)"],
+        #     inputs,
+        #     rest.REST_GRAMMAR
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
+        ##########
+
+        result = learn_invariants(
+            rest.REST_GRAMMAR,
+            prop,
+            activated_patterns={"Def-Use (C / reST)"},
             positive_examples=inputs
         )
 
