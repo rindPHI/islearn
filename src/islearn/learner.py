@@ -45,6 +45,7 @@ def learn_invariants(
         deactivated_patterns: Optional[Iterable[str]] = None,
         k: int = 3) -> Dict[language.Formula, float]:
     positive_examples = set(positive_examples or [])
+    original_positive_examples = set(positive_examples)
     negative_examples = set(negative_examples or [])
 
     assert all(prop(example) for example in positive_examples)
@@ -100,7 +101,15 @@ def learn_invariants(
 
     graph = gg.GrammarGraph.from_grammar(grammar)
     positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k)
-    positive_examples_for_learning = filter_inputs_by_paths(positive_examples, graph, max_cnt=7, k=k, prefer_small=True)
+    positive_examples_for_learning = set(positive_examples)
+    if len(positive_examples_for_learning) < 7:
+        positive_examples_for_learning.update(
+            filter_inputs_by_paths(
+                positive_examples,
+                graph,
+                max_cnt=7 - len(positive_examples_for_learning),
+                k=k,
+                prefer_small=True))
     negative_examples = filter_inputs_by_paths(negative_examples, graph, max_cnt=10, k=k, prefer_small=True)
 
     logger.debug(

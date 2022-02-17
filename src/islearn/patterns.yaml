@@ -1,11 +1,19 @@
-- name: Def-Use (C / reST)
+- name: Def-Use (C)
+  group: Def-Use
+  constraint: |
+    forall <?NONTERMINAL> use_ctx in start:
+      forall <?NONTERMINAL> use in use_ctx:
+        exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+          (before(def_ctx, use_ctx) and
+          (= use def))
+
+- name: Def-Use (reST)
   group: Def-Use
   constraint: |
       forall <?NONTERMINAL> use_ctx in start:
         forall <?NONTERMINAL> use in use_ctx:
           exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
-            (before(def_ctx, use_ctx) and
-            (= use def))
+            (= use def)
 
 - name: Def-Use (XML)
   group: Def-Use

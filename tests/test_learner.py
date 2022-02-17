@@ -44,7 +44,7 @@ forall <expr> use_ctx in start:
 
         ##########
         # candidates = generate_candidates(
-        #     patterns_from_file()["Def-Use (C / reST)"],
+        #     patterns_from_file()["Def-Use (C)"],
         #     inputs,
         #     scriptsizec.SCRIPTSIZE_C_GRAMMAR
         # )
@@ -58,7 +58,7 @@ forall <expr> use_ctx in start:
         result = learn_invariants(
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
-            activated_patterns={"Def-Use (C / reST)"},
+            activated_patterns={"Def-Use (C)"},
             positive_examples=inputs
         )
 
@@ -84,8 +84,13 @@ forall <internal_reference> use_ctx in start:
             return rest.render_rst(tree) is True
 
         raw_inputs = [
-            "{int c;c < 0;}",
-            "{17 < 0;}",
+            """.. _p:
+
+a	p_)
+
+x
+-
+""",
         ]
         inputs = [
             language.DerivationTree.from_parse_tree(
@@ -94,7 +99,7 @@ forall <internal_reference> use_ctx in start:
 
         ##########
         # candidates = generate_candidates(
-        #     patterns_from_file()["Def-Use (C / reST)"],
+        #     patterns_from_file()["Def-Use (reST)"],
         #     inputs,
         #     rest.REST_GRAMMAR
         # )
@@ -108,7 +113,7 @@ forall <internal_reference> use_ctx in start:
         result = learn_invariants(
             rest.REST_GRAMMAR,
             prop,
-            activated_patterns={"Def-Use (C / reST)"},
+            activated_patterns={"Def-Use (reST)"},
             positive_examples=inputs
         )
 
@@ -277,7 +282,7 @@ forall <json> container in start:
         self.assertTrue(patterns)
         self.assertGreaterEqual(len(patterns), 2)
         self.assertIn("Def-Use", patterns)
-        self.assertIn("Def-Use (C / reST)", patterns)
+        self.assertIn("Def-Use (C)", patterns)
         self.assertIn("Def-Use (XML)", patterns)
         self.assertNotIn("Def-Use (...)", patterns)
 
