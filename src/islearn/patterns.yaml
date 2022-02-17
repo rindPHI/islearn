@@ -10,10 +10,9 @@
 - name: Def-Use (reST)
   group: Def-Use
   constraint: |
-      forall <?NONTERMINAL> use_ctx in start:
-        forall <?NONTERMINAL> use in use_ctx:
-          exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
-            (= use def)
+      forall <?NONTERMINAL> use_ctx="{<?MATCHEXPR(use)>}" in start:
+        exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+          (= use def)
 
 - name: Def-Use (XML)
   group: Def-Use
