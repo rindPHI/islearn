@@ -101,15 +101,22 @@ def learn_invariants(
 
     graph = gg.GrammarGraph.from_grammar(grammar)
     positive_examples = filter_inputs_by_paths(positive_examples, graph, max_cnt=10, k=k)
-    positive_examples_for_learning = set(positive_examples)
-    if len(positive_examples_for_learning) < 7:
-        positive_examples_for_learning.update(
-            filter_inputs_by_paths(
-                positive_examples,
-                graph,
-                max_cnt=7 - len(positive_examples_for_learning),
-                k=k,
-                prefer_small=True))
+
+    positive_examples_for_learning = filter_inputs_by_paths(
+        original_positive_examples,
+        graph,
+        max_cnt=4,
+        k=k,
+        prefer_small=True)
+
+    positive_examples_for_learning.update(
+        filter_inputs_by_paths(
+            positive_examples,
+            graph,
+            max_cnt=7 - len(positive_examples_for_learning),
+            k=k,
+            prefer_small=True))
+
     negative_examples = filter_inputs_by_paths(negative_examples, graph, max_cnt=10, k=k, prefer_small=True)
 
     logger.debug(
