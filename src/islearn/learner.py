@@ -15,14 +15,14 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
-from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL
+from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
 from isla.type_defs import Grammar, ParseTree
 from pathos import multiprocessing as pmp
 
-from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure
+from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, tree_in
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
@@ -45,18 +45,24 @@ class InvariantLearner:
             pattern_file: Optional[str] = None,
             activated_patterns: Optional[Iterable[str]] = None,
             deactivated_patterns: Optional[Iterable[str]] = None,
-            k: int = 3):
+            k: int = 3,
+            target_number_positive_samples: int = 10,
+            target_number_negative_samples: int = 10,
+            target_number_positive_samples_for_learning: int = 10):
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)
         self.graph = gg.GrammarGraph.from_grammar(grammar)
         self.prop = prop
         self.k = k
 
-        self.positive_examples = positive_examples
-        self.negative_examples = negative_examples
-        self.positive_examples = set(self.positive_examples or [])
-        self.original_positive_examples = set(positive_examples)
-        self.negative_examples = set(self.negative_examples or [])
+        self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
+        self.original_positive_examples: List[language.DerivationTree] = list(positive_examples)
+        self.negative_examples: List[language.DerivationTree] = list(set(negative_examples or []))
+
+        self.target_number_positive_samples = target_number_positive_samples
+        self.target_number_negative_samples = target_number_negative_samples
+        self.target_number_positive_samples_for_learning = target_number_positive_samples_for_learning
+        assert target_number_positive_samples >= target_number_positive_samples_for_learning
 
         assert all(prop(example) for example in self.positive_examples)
         assert all(not prop(example) for example in self.negative_examples)
@@ -89,6 +95,7 @@ class InvariantLearner:
         logger.info("Filtering invariants.")
 
         # Only consider *real* invariants
+        # We first consider rather small inputs with rather many k-paths
         invariants = [
             candidate for candidate in candidates
             if parallel_all(lambda inp: evaluate(candidate, inp, self.grammar).is_true(), self.positive_examples)
@@ -120,15 +127,6 @@ class InvariantLearner:
         }
 
         logger.info("Found %d invariants with non-zero precision.", len([p for p in result.values() if p > 0]))
-
-        # result: Dict[language.Formula, float] = {}
-        # for invariant in invariants:
-        #   with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-        #       num_counter_examples = sum(pool.map(
-        #           lambda negative_example: int(evaluate(invariant, negative_example, grammar).is_true()),
-        #           negative_examples))
-
-        #   result[invariant] = 1 - (num_counter_examples / (len(negative_examples) or 1))
 
         return dict(cast(List[Tuple[language.Formula, float]],
                          sorted(result.items(), key=lambda p: p[1], reverse=True)))
@@ -225,24 +223,34 @@ class InvariantLearner:
             len(self.negative_examples)
         )
 
-        ne_before = len(self.negative_examples)
-        pe_before = len(self.positive_examples)
-        self._generate_sample_inputs()
+        if not self.positive_examples:
+            ne_before = len(self.negative_examples)
+            pe_before = len(self.positive_examples)
+            self._generate_sample_inputs()
 
-        logger.info(
-            "Generated %d additional positive, and %d additional negative samples (by grammar fuzzing).",
-            len(self.positive_examples) - pe_before,
-            len(self.negative_examples) - ne_before
-        )
+            logger.info(
+                "Generated %d additional positive, and %d additional negative samples (by grammar fuzzing).",
+                len(self.positive_examples) - pe_before,
+                len(self.negative_examples) - ne_before
+            )
 
+        # logger.debug(
+        #     "Positive examples:\n%s",
+        #     "\n".join(map(str, self.positive_examples)))
+
+        assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
         pe_before = len(self.positive_examples)
         ne_before = len(self.negative_examples)
         mutation_fuzzer = MutationFuzzer(self.grammar, self.positive_examples, self.prop, k=self.k)
         for inp in mutation_fuzzer.run(num_iterations=50, alpha=.1, yield_negative=True):
-            if self.prop(inp):
-                self.positive_examples.add(inp)
-            else:
-                self.negative_examples.add(inp)
+            if self.prop(inp) and not tree_in(inp, self.positive_examples):
+                self.positive_examples.append(inp)
+            elif not self.prop(inp) and not tree_in(inp, self.negative_examples):
+                self.negative_examples.append(inp)
+
+        # logger.debug(
+        #     "Positive examples:\n%s",
+        #     "\n".join(map(str, self.positive_examples)))
 
         logger.info(
             "Generated %d additional positive, and %d additional negative samples (by mutation fuzzing).",
@@ -250,26 +258,40 @@ class InvariantLearner:
             len(self.negative_examples) - ne_before
         )
 
-        graph = gg.GrammarGraph.from_grammar(self.grammar)
-        self.positive_examples = self._filter_inputs_by_paths(self.positive_examples, max_cnt=10)
+        if (len(self.positive_examples) < self.target_number_positive_samples or
+                len(self.negative_examples) < self.target_number_negative_samples):
+            ne_before = len(self.negative_examples)
+            pe_before = len(self.positive_examples)
+            self._generate_sample_inputs()
 
-        self.positive_examples_for_learning = self._filter_inputs_by_paths(
-            self.original_positive_examples,
-            max_cnt=4,
-            prefer_small=True)
+            # logger.debug(
+            #     "Positive examples:\n%s",
+            #     "\n".join(map(str, self.positive_examples)))
 
-        self.positive_examples_for_learning.update(
-            self._filter_inputs_by_paths(
+            logger.info(
+                "Generated %d additional positive, and %d additional negative samples (by grammar fuzzing).",
+                len(self.positive_examples) - pe_before,
+                len(self.negative_examples) - ne_before
+            )
+
+        self.positive_examples = self.sort_inputs(
+            self.positive_examples,
+            more_paths_weight=1.5,
+            smaller_inputs_weight=1.0,
+        )[:self.target_number_positive_samples]
+
+        self.negative_examples = \
+            self.sort_inputs(
+                self.negative_examples,
+                more_paths_weight=2.0,
+                smaller_inputs_weight=1.0
+            )[:self.target_number_negative_samples]
+
+        self.positive_examples_for_learning = \
+            self.sort_inputs(
                 self.positive_examples,
-                max_cnt=7 - len(self.positive_examples_for_learning),
-                prefer_small=True))
-
-        self.negative_examples = self._filter_inputs_by_paths(
-            self.negative_examples, max_cnt=10, prefer_small=True)
-
-        logger.debug(
-            "Examples for learning:\n%s",
-            "\n".join(map(str, self.positive_examples_for_learning)))
+                more_paths_weight=1.7,
+                smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
 
         logger.info(
             "Reduced positive / negative samples to subsets of %d / %d samples based on k-path coverage, "
@@ -279,25 +301,32 @@ class InvariantLearner:
             len(self.positive_examples_for_learning),
         )
 
+        logger.debug(
+            "Positive examples:\n%s",
+            "\n".join(map(str, self.positive_examples)))
+
+        logger.debug(
+            "Examples for learning:\n%s",
+            "\n".join(map(str, self.positive_examples_for_learning)))
+
     def _generate_sample_inputs(
             self,
-            desired_number_examples: int = 10,
             num_tries: int = 100) -> None:
         fuzzer = isla.fuzzer.GrammarCoverageFuzzer(self.grammar)
-        if (len(self.positive_examples) < desired_number_examples or
-                len(self.negative_examples) < desired_number_examples):
+        if (len(self.positive_examples) < self.target_number_positive_samples or
+                len(self.negative_examples) < self.target_number_negative_samples):
             i = 0
-            while ((len(self.positive_examples) < desired_number_examples
-                    or len(self.negative_examples) < desired_number_examples)
+            while ((len(self.positive_examples) < self.target_number_positive_samples
+                    or len(self.negative_examples) < self.target_number_negative_samples)
                    and i < num_tries):
                 i += 1
 
                 inp = fuzzer.expand_tree(language.DerivationTree("<start>", None))
 
-                if self.prop(inp):
-                    self.positive_examples.add(inp)
-                else:
-                    self.negative_examples.add(inp)
+                if self.prop(inp) and not tree_in(inp, self.positive_examples):
+                    self.positive_examples.append(inp)
+                elif not self.prop(inp) and not tree_in(inp, self.negative_examples):
+                    self.negative_examples.append(inp)
 
     def _generate_counter_examples_from_formulas(
             self,
@@ -328,37 +357,45 @@ class InvariantLearner:
 
         return result
 
-    def _filter_inputs_by_paths(
+    def sort_inputs(
             self,
             inputs: Iterable[language.DerivationTree],
-            max_cnt: int = 10,
-            prefer_small=False) -> Set[language.DerivationTree]:
+            more_paths_weight: float = 1.0,
+            smaller_inputs_weight: float = 0.0) -> List[language.DerivationTree]:
+        assert more_paths_weight or smaller_inputs_weight
         inputs = set(inputs)
-
-        if len(inputs) <= max_cnt:
-            return inputs
+        result: List[language.DerivationTree] = []
 
         tree_paths = {inp: self.graph.k_paths_in_tree(inp.to_parse_tree(), self.k) for inp in inputs}
-
-        result: Set[language.DerivationTree] = set([])
         covered_paths: Set[Tuple[gg.Node, ...]] = set([])
+        max_len_input = max(len(inp) for inp in inputs)
 
         def uncovered_paths(inp: language.DerivationTree) -> Set[Tuple[gg.Node, ...]]:
             return {path for path in tree_paths[inp] if path not in covered_paths}
 
-        while inputs and len(result) < max_cnt and len(covered_paths) < len(self.graph.k_paths(self.k)):
-            if prefer_small:
-                try:
-                    inp = next(inp for inp in sorted(inputs, key=lambda inp: len(inp))
-                               if uncovered_paths(inp))
-                except StopIteration:
-                    break
-            else:
-                inp = sorted(inputs, key=lambda inp: (len(uncovered_paths(inp)), -len(inp)), reverse=True)[0]
+        def sort_by_paths_key(inp: language.DerivationTree) -> float:
+            return len(uncovered_paths(inp))
 
-            covered_paths.update(tree_paths[inp])
+        def sort_by_length_key(inp: language.DerivationTree) -> float:
+            return len(inp)
+
+        def sort_by_paths_and_length_key(inp: language.DerivationTree) -> float:
+            return weighted_geometric_mean(
+                [len(uncovered_paths(inp)), max_len_input - len(inp)],
+                [more_paths_weight, smaller_inputs_weight])
+
+        if not more_paths_weight:
+            key = sort_by_length_key
+        elif not smaller_inputs_weight:
+            key = sort_by_paths_key
+        else:
+            key = sort_by_paths_and_length_key
+
+        while inputs:
+            inp = sorted(inputs, key=key, reverse=True)[0]
+
+            result.append(inp)
             inputs.remove(inp)
-            result.add(inp)
 
         return result
 
@@ -705,14 +742,21 @@ class VariablesEqualFilter(PatternInstantiationFilter):
                     List[NonterminalPlaceholderVariable],
                     list(smt_equality_formula.free_variables()))
 
-                trees_1 = inp.filter(lambda t: t.value == free_vars[0].n_type)
-                trees_2 = inp.filter(lambda t: t.value == free_vars[1].n_type)
+                if free_vars[0].n_type != free_vars[1].n_type:
+                    # NOTE: In all existing case studies, we are only stipulating equality
+                    #       of variables with equal nonterminal type. It might be possible
+                    #       to do this with variables that are in a supertype relation, but
+                    #       this gives us fewer chances of filtering.
+                    success = False
+                    break
+
+                trees = inp.filter(lambda t: t.value == free_vars[0].n_type)
 
                 if not any(
                         t1.value == free_vars[0].n_type and
                         t2.value == free_vars[1].n_type
                         for (p1, t1), (p2, t2)
-                        in itertools.product(trees_1, trees_2)
+                        in itertools.product(trees, trees)
                         if str(t1) == str(t2) and p1 != p2):
                     success = False
                     break

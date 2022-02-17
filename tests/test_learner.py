@@ -42,12 +42,15 @@ forall <expr> use_ctx in start:
                 next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
             for inp in raw_inputs]
 
-        ##########
-        # candidates = generate_candidates(
+        #########
+        # candidates = InvariantLearner(
+        #     scriptsizec.SCRIPTSIZE_C_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Def-Use (C)"},
+        #     positive_examples=inputs
+        # ).generate_candidates(
         #     patterns_from_file()["Def-Use (C)"],
-        #     inputs,
-        #     scriptsizec.SCRIPTSIZE_C_GRAMMAR
-        # )
+        #     inputs)
         #
         # print(len(candidates))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
@@ -59,7 +62,9 @@ forall <expr> use_ctx in start:
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
             activated_patterns={"Def-Use (C)"},
-            positive_examples=inputs
+            positive_examples=inputs,
+            target_number_positive_samples=7,
+            target_number_positive_samples_for_learning=4
         ).learn_invariants()
 
         # print(len(result))

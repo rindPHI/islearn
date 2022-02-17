@@ -32,7 +32,7 @@ def parallel_all(f: Callable[[T], bool], iterable: Iterable[T], chunk_size=16, p
     #
     # return True
     with pmp.ProcessingPool(processes=processes) as pool:
-        results = pool.uimap(f, iterable)
+        results = pool.imap(f, iterable)
         for result in results:
             if not result:
                 return False
@@ -221,3 +221,5 @@ def replace_formula_by_formulas(
     return {in_formula}
 
 
+def tree_in(tree: isla.language.DerivationTree, iterable: Iterable[isla.language.DerivationTree]) -> bool:
+    return any(tree.structurally_equal(t) for t in iterable)
