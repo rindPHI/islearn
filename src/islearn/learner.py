@@ -95,12 +95,16 @@ class InvariantLearner:
         logger.info("Filtering invariants.")
 
         # Only consider *real* invariants
-        # We first consider rather small inputs with rather many k-paths
-        invariants = [
-            candidate for candidate in candidates
-            if parallel_all(lambda inp: evaluate(candidate, inp, self.grammar).is_true(), self.positive_examples)
-            # if all(evaluate(candidate, inp, grammar).is_true() for inp in positive_examples)
-        ]
+        invariants = list(candidates)
+        test_inputs = list(self.positive_examples)
+        while invariants and test_inputs:
+            inp = test_inputs.pop(0)
+            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+                invariants = [inv for inv in pool.map(
+                    lambda inv: (inv if evaluate(inv, inp, self.grammar).is_true() else None),
+                    invariants,
+                    chunksize=10
+                ) if inv is not None]
 
         logger.info("%d invariants remain after filtering.", len(invariants))
 
