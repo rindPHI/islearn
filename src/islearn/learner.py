@@ -56,7 +56,7 @@ class InvariantLearner:
         self.k = k
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
-        self.original_positive_examples: List[language.DerivationTree] = list(positive_examples)
+        self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
         self.negative_examples: List[language.DerivationTree] = list(set(negative_examples or []))
 
         self.target_number_positive_samples = target_number_positive_samples
@@ -82,8 +82,8 @@ class InvariantLearner:
                 for pattern in patterns]
 
     def learn_invariants(self) -> Dict[language.Formula, float]:
-        assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
         self._generate_more_inputs()
+        assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
 
         candidates = self.generate_candidates(self.patterns, self.positive_examples_for_learning)
         logger.info("Found %d invariant candidates.", len(candidates))
