@@ -1,9 +1,11 @@
 import copy
 import json
 import logging
+import math
+import string
 import unittest
 
-from fuzzingbook.Grammars import JSON_GRAMMAR
+from fuzzingbook.Grammars import JSON_GRAMMAR, srange
 from fuzzingbook.Parser import EarleyParser
 from isla.evaluator import evaluate
 from isla.fuzzer import GrammarCoverageFuzzer
@@ -62,6 +64,41 @@ class TestMutator(unittest.TestCase):
 
         mutation_fuzzer = MutationFuzzer(scriptsizec.SCRIPTSIZE_C_GRAMMAR, inputs, prop, k=3)
         for inp in mutation_fuzzer.run(num_iterations=50, alpha=.1):
+            self.assertTrue(prop(inp))
+            logging.getLogger(type(self).__name__).info(inp)
+
+    def test_mutate_arith_grammar(self):
+        grammar = {
+            "<start>": ["<arith_expr>"],
+            "<arith_expr>": ["<function>(<number>)"],
+            "<function>": ["sqrt", "sin", "cos", "tan"],
+            "<number>": ["<maybe_minus><onenine><maybe_digits><maybe_frac>"],
+            "<maybe_minus>": ["", "-"],
+            "<onenine>": [str(num) for num in range(1, 10)],
+            "<digit>": srange(string.digits),
+            "<maybe_digits>": ["", "<digits>"],
+            "<digits>": ["<digit>", "<digit><digits>"],
+            "<maybe_frac>": ["", ".<digits>"]
+        }
+
+        def arith_eval(inp: DerivationTree) -> float:
+            return eval(str(inp), {"sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan})
+
+        def prop(inp: DerivationTree) -> bool:
+            try:
+                arith_eval(inp)
+                return False
+            except ValueError:
+                return True
+
+        raw_inputs = ["cos(-2)"]
+        inputs = [
+            DerivationTree.from_parse_tree(
+                next(EarleyParser(grammar).parse(inp)))
+            for inp in raw_inputs]
+
+        mutation_fuzzer = MutationFuzzer(grammar, inputs, prop, k=3)
+        for inp in mutation_fuzzer.run(num_iterations=100, alpha=.1):
             self.assertTrue(prop(inp))
             logging.getLogger(type(self).__name__).info(inp)
 

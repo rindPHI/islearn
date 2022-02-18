@@ -16,14 +16,17 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
-from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean
+from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean, \
+    visit_z3_expr
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
 from isla.type_defs import Grammar, ParseTree
+from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
-from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, tree_in
+from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
+    is_int
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
@@ -53,7 +56,8 @@ class InvariantLearner:
             filters: Sequence[str] = (
                     "Structural Predicates Filter",
                     "Variable Equality Filter",
-                    "Nonterminal String in `count` Predicates Filter"
+                    "Nonterminal String in `count` Predicates Filter",
+                    "String-to-Int Filter",
             ),
             mexpr_expansion_limit: int = 5):
         self.grammar = grammar
@@ -105,21 +109,21 @@ class InvariantLearner:
 
         # Only consider *real* invariants
 
-        invariants = list(candidates)
-        test_inputs = list(self.positive_examples)
-        while invariants and test_inputs:
-            inp = test_inputs.pop(0)
-            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
-                invariants = [inv for inv in pool.map(
-                    lambda inv: (inv if evaluate(inv, inp, self.grammar).is_true() else None),
-                    invariants,
-                    chunksize=10
-                ) if inv is not None]
+        # invariants = list(candidates)
+        # test_inputs = list(self.positive_examples)
+        # while invariants and test_inputs:
+        #     inp = test_inputs.pop(0)
+        #     with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+        #         invariants = [inv for inv in pool.map(
+        #             lambda inv: (inv if evaluate(inv, inp, self.grammar).is_true() else None),
+        #             invariants,
+        #             chunksize=10
+        #         ) if inv is not None]
 
-        # invariants = [
-        #     inv for inv in candidates
-        #     if all(evaluate(inv, inp, self.grammar).is_true() for inp in self.positive_examples)
-        # ]
+        invariants = [
+            inv for inv in candidates
+            if all(evaluate(inv, inp, self.grammar).is_true() for inp in self.positive_examples)
+        ]
 
         logger.info("%d invariants remain after filtering.", len(invariants))
 
@@ -161,7 +165,8 @@ class InvariantLearner:
         filters: List[PatternInstantiationFilter] = [
             StructuralPredicatesFilter(),
             VariablesEqualFilter(),
-            NonterminalStringInCountPredicatesFilter(self.graph, input_reachability_relation)
+            NonterminalStringInCountPredicatesFilter(self.graph, input_reachability_relation),
+            StringToIntFilter(),
         ]
 
         filters = [filter for filter in filters if filter.name in self.filters]
@@ -901,6 +906,68 @@ class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
             reachable_variable_number_of_times(count_predicate.args[0].n_type, count_predicate.args[1])
             for count_predicate in count_predicates
         )
+
+
+class StringToIntFilter(PatternInstantiationFilter):
+    def __init__(self):
+        super().__init__("String-to-Int Filter")
+
+    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+        str_to_int_expressions_with_vars: List[Tuple[Set[z3.ExprRef], OrderedSet[language.Variable]]] = [
+            (
+                {z3_expr for z3_expr in set(visit_z3_expr(cast(language.SMTFormula, smt_for).formula))
+                 if z3_expr.decl().kind() == z3.Z3_OP_STR_TO_INT},
+                smt_for.free_variables())
+            for smt_for in language.FilterVisitor(lambda f: isinstance(f, language.SMTFormula)).collect(formula)
+        ]
+
+        str_to_int_expressions_with_vars = [p for p in str_to_int_expressions_with_vars if p[0]]
+
+        if not str_to_int_expressions_with_vars:
+            return True
+
+        def get_child(expr: z3.ExprRef) -> z3.SeqRef:
+            return expr.children()[0]
+
+        if any(z3.is_string_value(get_child(str_to_int_expression)) and
+               not is_int(get_child(str_to_int_expression).as_string())
+               for str_to_int_expressions, free_vars in str_to_int_expressions_with_vars
+               for str_to_int_expression in str_to_int_expressions):
+            return False
+
+        for inp in inputs:
+            success = True
+            for str_to_int_expressions, free_vars in str_to_int_expressions_with_vars:
+                for str_to_int_expression in str_to_int_expressions:
+                    if not is_z3_var(get_child(str_to_int_expression)):
+                        continue
+
+                    n_type = next(
+                        var.n_type for var in free_vars
+                        if var.name == get_child(str_to_int_expression).as_string())
+
+                    trees = [t for _, t in inp.filter(lambda t: t.value == n_type)]
+                    if not trees:
+                        success = False
+                        break
+
+                    # Success if there is a tree with an Integer value.
+                    if not any(is_int(str(tree)) for tree in trees):
+                        success = False
+                        break
+
+                if not success:
+                    break
+
+                # if not any(structural_formula.substitute_expressions(arg_substitution).evaluate(inp)
+                #            for arg_substitution in arg_substitutions):
+                #     success = False
+                #     break
+
+            if success:
+                return True
+
+        return False
 
 
 class InVisitor(language.FormulaVisitor):

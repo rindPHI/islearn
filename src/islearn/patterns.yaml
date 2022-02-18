@@ -58,3 +58,17 @@
     forall <?NONTERMINAL> container in start:
       exists <?NONTERMINAL> elem in container:
         (<= (str.len elem) (str.to.int <?STRING>))
+
+- name: Number Upper Bound
+  group: Existential
+  constraint: |
+    forall <?NONTERMINAL> container in start:
+      exists <?NONTERMINAL> elem in container:
+        (<= (str.to.int elem) (str.to.int <?STRING>))
+
+- name: Number Lower Bound
+  group: Existential
+  constraint: |
+    forall <?NONTERMINAL> container in start:
+      exists <?NONTERMINAL> elem in container:
+        (>= (str.to.int elem) (str.to.int <?STRING>))

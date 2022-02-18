@@ -1,12 +1,15 @@
 import copy
 import json
+import math
+import string
 import unittest
 
 import pytest
-from fuzzingbook.Grammars import JSON_GRAMMAR
+from fuzzingbook.Grammars import JSON_GRAMMAR, srange
 from fuzzingbook.Parser import EarleyParser
 from isla import language
 from isla.evaluator import evaluate
+from isla.helpers import delete_unreachable
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
@@ -288,6 +291,83 @@ forall <json> container in start:
 
         self.assertIn(
             correct_property.strip(),
+            list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p > .0])))
+
+    def test_alhazen_sqrt_example(self):
+        correct_property_1 = """
+forall <arith_expr> container in start:
+  exists <function> elem in container:
+    (= elem "sqrt")"""
+
+        correct_property_2 = """
+forall <arith_expr> container in start:
+  exists <number> elem in container:
+    (<= (str.to.int elem) (str.to.int "-1")))"""
+
+        grammar = {
+            "<start>": ["<arith_expr>"],
+            "<arith_expr>": ["<function>(<number>)"],
+            "<function>": ["sqrt", "sin", "cos", "tan"],
+            "<number>": ["<maybe_minus><onenine><maybe_digits><maybe_frac>"],
+            "<maybe_minus>": ["", "-"],
+            "<onenine>": [str(num) for num in range(1, 10)],
+            "<digit>": srange(string.digits),
+            "<maybe_digits>": ["", "<digits>"],
+            "<digits>": ["<digit>", "<digit><digits>"],
+            "<maybe_frac>": ["", ".<digits>"]
+        }
+
+        def arith_eval(inp: language.DerivationTree) -> float:
+            return eval(str(inp), {"sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan})
+
+        def prop(inp: language.DerivationTree) -> bool:
+            try:
+                arith_eval(inp)
+                return False
+            except ValueError:
+                return True
+
+        inputs = ["sqrt(-2)"]
+        trees = [language.DerivationTree.from_parse_tree(next(EarleyParser(grammar).parse(inp)))
+                 for inp in inputs]
+
+        #############
+        repo = patterns_from_file()
+        candidates = InvariantLearner(
+            grammar,
+            prop,
+            positive_examples=trees
+        ).generate_candidates(
+            # list(repo["String Existence"] | (repo["Number Upper Bound"])),
+            repo["Number Upper Bound"],
+            trees
+        )
+
+        print(len(candidates))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        return
+        #############
+
+        self.assertTrue(all(evaluate(correct_property_1, tree, grammar) for tree in trees))
+        self.assertTrue(all(evaluate(correct_property_2, tree, grammar) for tree in trees))
+
+        result = InvariantLearner(
+            grammar,
+            prop,
+            activated_patterns={"String Existence", "Number Upper Bound"},
+            positive_examples=trees
+        ).learn_invariants()
+
+        print(len(result))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+
+        self.assertIn(
+            correct_property_1.strip(),
+            list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p > .0])))
+
+        self.assertIn(
+            correct_property_2.strip(),
             list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p > .0])))
 
     def test_load_patterns_from_file(self):

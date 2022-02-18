@@ -9,6 +9,14 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
+def is_int(maybe_int: str) -> bool:
+    try:
+        int(maybe_int)
+        return True
+    except ValueError:
+        return False
+
+
 def e_assert_present(expression: T, message: Optional[str] = None) -> T:
     return e_assert(expression, lambda e: e is not None, message)
 
