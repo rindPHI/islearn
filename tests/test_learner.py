@@ -79,7 +79,7 @@ forall <expr> use_ctx in start:
         correct_property = """
 forall <internal_reference> use_ctx="<presep>{<id> use}_<postsep>" in start:
   exists <labeled_paragraph> def_ctx=".. _{<id> def}:\n\n<paragraph>" in start:
-    ((different_position(use_ctx, def_ctx) and
+    (different_position(use_ctx, def_ctx) and
     (= use def))"""
 
         def prop(tree: language.DerivationTree) -> bool:

@@ -104,16 +104,25 @@ class InvariantLearner:
         logger.info("Filtering invariants.")
 
         # Only consider *real* invariants
-        invariants = list(candidates)
-        test_inputs = list(self.positive_examples)
-        while invariants and test_inputs:
-            inp = test_inputs.pop(0)
-            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
-                invariants = [inv for inv in pool.map(
-                    lambda inv: (inv if evaluate(inv, inp, self.grammar).is_true() else None),
-                    invariants,
-                    chunksize=10
-                ) if inv is not None]
+
+        # TODO: Check if any speedups can be gained by parallel evaluation.
+        #       In experiments (after having improved candidate selection), sequential evaluation was faster...
+
+        # invariants = list(candidates)
+        # test_inputs = list(self.positive_examples)
+        # while invariants and test_inputs:
+        #     inp = test_inputs.pop(0)
+        #     with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+        #         invariants = [inv for inv in pool.map(
+        #             lambda inv: (inv if evaluate(inv, inp, self.grammar).is_true() else None),
+        #             invariants,
+        #             chunksize=10
+        #         ) if inv is not None]
+
+        invariants = [
+            inv for inv in candidates
+            if all(evaluate(inv, inp, self.grammar).is_true() for inp in self.positive_examples)
+        ]
 
         logger.info("%d invariants remain after filtering.", len(invariants))
 
