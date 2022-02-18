@@ -332,21 +332,21 @@ forall <arith_expr> container in start:
                  for inp in inputs]
 
         #############
-        repo = patterns_from_file()
-        candidates = InvariantLearner(
-            grammar,
-            prop,
-            positive_examples=trees
-        ).generate_candidates(
-            # list(repo["String Existence"] | (repo["Number Upper Bound"])),
-            repo["Number Upper Bound"],
-            trees
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     grammar,
+        #     prop,
+        #     positive_examples=trees
+        # ).generate_candidates(
+        #     # list(repo["String Existence"] | (repo["Number Upper Bound"])),
+        #     repo["Number Upper Bound"],
+        #     trees
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         #############
 
         self.assertTrue(all(evaluate(correct_property_1, tree, grammar) for tree in trees))
@@ -355,7 +355,7 @@ forall <arith_expr> container in start:
         result = InvariantLearner(
             grammar,
             prop,
-            activated_patterns={"String Existence", "Number Upper Bound"},
+            activated_patterns={"Number Upper Bound"},
             positive_examples=trees
         ).learn_invariants()
 

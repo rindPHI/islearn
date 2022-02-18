@@ -17,6 +17,14 @@ def is_int(maybe_int: str) -> bool:
         return False
 
 
+def is_float(maybe_float: str) -> bool:
+    try:
+        float(maybe_float)
+        return True
+    except ValueError:
+        return False
+
+
 def e_assert_present(expression: T, message: Optional[str] = None) -> T:
     return e_assert(expression, lambda e: e is not None, message)
 

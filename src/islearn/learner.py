@@ -26,7 +26,7 @@ from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
 from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
-    is_int
+    is_int, is_float
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
@@ -109,6 +109,20 @@ class InvariantLearner:
 
         # Only consider *real* invariants
 
+        def safe_evaluate(formula: language.Formula, inp: language.DerivationTree) -> bool:
+            try:
+                return evaluate(formula, inp, self.grammar).is_true()
+            except Exception as e:
+                logger.debug(
+                    "Exception (%s) occurred when evaluating formula %s with input %s:\n%s",
+                    type(e).__name__,
+                    language.ISLaUnparser(formula).unparse(),
+                    str(inp),
+                    str(e)
+                )
+                return False
+
+
         # invariants = list(candidates)
         # test_inputs = list(self.positive_examples)
         # while invariants and test_inputs:
@@ -122,7 +136,7 @@ class InvariantLearner:
 
         invariants = [
             inv for inv in candidates
-            if all(evaluate(inv, inp, self.grammar).is_true() for inp in self.positive_examples)
+            if all(safe_evaluate(inv, inp) for inp in self.positive_examples)
         ]
 
         logger.info("%d invariants remain after filtering.", len(invariants))
@@ -138,7 +152,7 @@ class InvariantLearner:
 
         with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
             eval_results = pool.map(
-                lambda t: (t[0], int(evaluate(t[0], t[1], self.grammar).is_true())),
+                lambda t: (t[0], int(safe_evaluate(t[0], t[1]))),
                 itertools.product(invariants, self.negative_examples),
                 chunksize=10
             )
@@ -667,19 +681,26 @@ class InvariantLearner:
             return inst_patterns
 
         fragments: Dict[str, Set[str]] = {
-            nonterminal: functools.reduce(
-                set.intersection,
-                [
-                    {
-                        str(subtree)
-                        for _, subtree in inp.filter(lambda t: t.value == nonterminal)
-                        if str(subtree)
-                    }
-                    for inp in inputs
-                ]
-            )
+            nonterminal: {
+                str(subtree)
+                for inp in inputs
+                for _, subtree in inp.filter(lambda t: t.value == nonterminal)
+                if str(subtree)
+            }
             for nonterminal in self.grammar
         }
+
+        # For strings representing floats, we also include the rounded Integers.
+        for fragments_set in fragments.values():
+            fragments_set |= {
+                str(int(float(fragment)))
+                for fragment in fragments_set
+                if is_float(fragment) and not is_int(fragment)
+            } | {
+                str(int(float(fragment)) + 1)
+                for fragment in fragments_set
+                if is_float(fragment) and not is_int(fragment)
+            }
 
         result: Set[language.Formula] = set([])
         for inst_pattern in inst_patterns:
@@ -934,6 +955,10 @@ class StringToIntFilter(PatternInstantiationFilter):
                for str_to_int_expressions, free_vars in str_to_int_expressions_with_vars
                for str_to_int_expression in str_to_int_expressions):
             return False
+
+        # TODO Exclude n_types that can be empty? Or, in evaluation function, return False
+        #      for universal / existential quantifiers if evaluation of inner formula yields
+        #      an exception. Problem is str.to.int for nullable nonterminals.
 
         for inp in inputs:
             success = True
