@@ -12,7 +12,8 @@
   constraint: |
       forall <?NONTERMINAL> use_ctx="{<?MATCHEXPR(use)>}" in start:
         exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
-          (= use def)
+          (different_position(use_ctx, def_ctx) and
+          (= use def))
 
 - name: Def-Use (XML)
   group: Def-Use

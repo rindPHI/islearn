@@ -6,7 +6,8 @@ import os.path
 import pkgutil
 import re
 from abc import ABC
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable
+from functools import lru_cache
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence, Generator
 
 import isla.fuzzer
 import z3
@@ -48,12 +49,20 @@ class InvariantLearner:
             k: int = 3,
             target_number_positive_samples: int = 10,
             target_number_negative_samples: int = 10,
-            target_number_positive_samples_for_learning: int = 10):
+            target_number_positive_samples_for_learning: int = 10,
+            filters: Sequence[str] = (
+                    "Structural Predicates Filter",
+                    "Variable Equality Filter",
+                    "Nonterminal String in `count` Predicates Filter"
+            ),
+            mexpr_expansion_limit: int = 5):
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)
         self.graph = gg.GrammarGraph.from_grammar(grammar)
         self.prop = prop
         self.k = k
+        self.filters = filters
+        self.mexpr_expansion_limit = mexpr_expansion_limit
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -139,18 +148,7 @@ class InvariantLearner:
             self,
             patterns: Iterable[language.Formula | str],
             inputs: Iterable[language.DerivationTree]) -> Set[language.Formula]:
-        nonterminal_paths: Set[Tuple[str, ...]] = {
-            tuple([inp.get_subtree(path[:idx]).value
-                   for idx in range(len(path))])
-            for inp in inputs
-            for path, _ in inp.leaves()
-        }
-
-        input_reachability_relation: Set[Tuple[str, str]] = transitive_closure({
-            pair
-            for path in nonterminal_paths
-            for pair in [(path[i], path[k]) for i in range(len(path)) for k in range(i + 1, len(path))]
-        })
+        input_reachability_relation = self._create_input_reachability_relation(inputs)
 
         logger.debug("Computed input reachability relation of size %d", len(input_reachability_relation))
 
@@ -159,6 +157,8 @@ class InvariantLearner:
             VariablesEqualFilter(),
             NonterminalStringInCountPredicatesFilter(self.graph, input_reachability_relation)
         ]
+
+        filters = [filter for filter in filters if filter.name in self.filters]
 
         patterns = [
             parse_abstract_isla(pattern, self.grammar) if isinstance(pattern, str)
@@ -219,6 +219,24 @@ class InvariantLearner:
             result.update(pattern_insts_meeting_atom_requirements)
 
         return result
+
+    def _create_input_reachability_relation(self, inputs: Iterable[language.DerivationTree]) -> Set[Tuple[str, str]]:
+        nonterminal_paths: Set[Tuple[str, ...]] = {
+            tuple([inp.get_subtree(path[:idx]).value
+                   for idx in range(len(path))])
+            for inp in inputs
+            for path, _ in inp.leaves()
+        }
+
+        input_reachability_relation: Set[Tuple[str, str]] = transitive_closure({
+            pair
+            for path in nonterminal_paths
+            for pair in [(path[i], path[k]) for i in range(len(path)) for k in range(i + 1, len(path))]
+        })
+
+        logger.debug("Computed input reachability relation of size %d", len(input_reachability_relation))
+
+        return input_reachability_relation
 
     def _generate_more_inputs(self):
         logger.info(
@@ -452,8 +470,7 @@ class InvariantLearner:
 
     def _instantiate_mexpr_placeholders(
             self,
-            inst_patterns: Set[language.Formula],
-            expansion_limit: int = 5) -> Set[language.Formula]:
+            inst_patterns: Set[language.Formula]) -> Set[language.Formula]:
         def quantified_formulas_with_mexpr_phs(formula: language.Formula) -> Set[language.QuantifiedFormula]:
             return cast(Set[language.QuantifiedFormula], set(language.FilterVisitor(
                 lambda f: (isinstance(f, language.QuantifiedFormula) and
@@ -478,90 +495,118 @@ class InvariantLearner:
                 mexpr_ph: MexprPlaceholderVariable = cast(
                     AbstractBindExpression,
                     qfd_formula_w_mexpr_phs.bind_expression).bound_elements[0]
-                nonterminal_types = [var.n_type for var in mexpr_ph.variables]
-                # We have to collect abstract instantiation of `qfd_formula_w_mexpr_phs.bound_variable`'s type
-                # containing `nonterminal_types` in the given order.
+                in_nonterminal = qfd_formula_w_mexpr_phs.bound_variable.n_type
+                nonterminal_types = tuple([var.n_type for var in mexpr_ph.variables])
 
-                candidate_trees: List[ParseTree] = [(qfd_formula_w_mexpr_phs.bound_variable.n_type, None)]
-                i = 0
-                while candidate_trees and i <= expansion_limit:
-                    i += 1
-                    tree = candidate_trees.pop(0)
+                for mexpr_str in self._infer_mexpr(in_nonterminal, nonterminal_types):
+                    def replace_with_var(elem: str) -> str | language.Variable:
+                        try:
+                            return next(var for idx, var in enumerate(mexpr_ph.variables)
+                                        if elem == var.n_type.replace(">", f"-{hash((var.n_type, idx))}>"))
+                        except StopIteration:
+                            return elem
 
-                    nonterminal_occurrences = [
-                        [path for path, _ in filter_tree(tree, lambda t: t[0] == ntype)]
-                        for ntype in nonterminal_types]
+                    mexpr_elements = [
+                        replace_with_var(token)
+                        for token in
+                        re.split(RE_NONTERMINAL, mexpr_str)
+                        if token]
 
-                    if all(occ for occ in nonterminal_occurrences):
-                        product = list(itertools.product(*nonterminal_occurrences))
-                        matching_seqs = [
-                            seq for seq in product
-                            if (list(seq) == sorted(seq) and
-                                all(is_before(None, seq[idx], seq[idx + 1]) for idx in range(len(seq) - 1)))]
+                    constructor = (
+                        language.ForallFormula if isinstance(qfd_formula_w_mexpr_phs, language.ForallFormula)
+                        else language.ExistsFormula)
 
-                        for matching_seq in matching_seqs:
-                            assert len(matching_seq) == len(nonterminal_types)
+                    new_formula = constructor(
+                        qfd_formula_w_mexpr_phs.bound_variable,
+                        qfd_formula_w_mexpr_phs.in_variable,
+                        qfd_formula_w_mexpr_phs.inner_formula,
+                        language.BindExpression(*mexpr_elements))
 
-                            # We change node labels to be able to correctly identify variable positions in the tree.
-                            bind_expr_tree = tree
-                            for idx, path in enumerate(matching_seq):
-                                ntype = nonterminal_types[idx]
-                                bind_expr_tree = replace_path(
-                                    bind_expr_tree,
-                                    path,
-                                    (ntype.replace(">", f"-{hash((ntype, idx))}>"), None))
+                    stack.append(language.replace_formula(pattern, qfd_formula_w_mexpr_phs, new_formula))
 
-                            # We prune too specific leaves of the tree: Each node that does not contain
-                            # a variable node as a child, and is an immediate child of a node containing
-                            # a variable node, is pruned away.
-                            non_var_paths = [path for path, _ in tree_leaves(bind_expr_tree)
-                                             if path not in matching_seq]
+        return result
 
-                            for path in non_var_paths:
-                                if len(path) < 2:
-                                    continue
+    @lru_cache(maxsize=None)
+    def _infer_mexpr(
+            self,
+            in_nonterminal: str,
+            nonterminal_types: Tuple[str]) -> Set[str]:
+        result: Set[str] = set([])
 
-                                while len(path) > 1 and not any(
-                                        len(path[:-1]) < len(var_path) and
-                                        var_path[:len(path[:-1])] == path[:-1]
-                                        for var_path in matching_seq):
-                                    path = path[:-1]
+        candidate_trees: List[ParseTree] = [(in_nonterminal, None)]
+        i = 0
+        while candidate_trees and i <= self.mexpr_expansion_limit:
+            i += 1
+            tree = candidate_trees.pop(0)
 
-                                if len(path) > 0 and not any(
-                                        len(path) < len(var_path) and
-                                        var_path[:len(path)] == path
-                                        for var_path in matching_seq):
-                                    bind_expr_tree = replace_path(
-                                        bind_expr_tree,
-                                        path,
-                                        (get_subtree(bind_expr_tree, path)[0], None))
+            # If the candidate tree has the shape
+            #
+            #          qfd_nonterminal
+            #                 |
+            #         other_nonterminal
+            #                 |
+            #          ... subtree ...
+            #
+            # then we could as well quantify over `other_nonterminal`. Consequently,
+            # we prune this candidate. The other option is very likely also among
+            # inst_patterns.
 
-                            def replace_with_var(elem: str) -> str | language.Variable:
-                                try:
-                                    return next(var for idx, var in enumerate(mexpr_ph.variables)
-                                                if elem == var.n_type.replace(">", f"-{hash((var.n_type, idx))}>"))
-                                except StopIteration:
-                                    return elem
+            if (tree[1] is not None and
+                    len(tree[1]) == 1 and
+                    tree[1][0][1]):
+                continue
 
-                            mexpr_elements = [
-                                replace_with_var(token)
-                                for token in
-                                re.split(RE_NONTERMINAL, tree_to_string(bind_expr_tree, show_open_leaves=True))
-                                if token]
+            nonterminal_occurrences = [
+                [path for path, _ in filter_tree(tree, lambda t: t[0] == ntype)]
+                for ntype in nonterminal_types]
 
-                            constructor = (
-                                language.ForallFormula if isinstance(qfd_formula_w_mexpr_phs, language.ForallFormula)
-                                else language.ExistsFormula)
+            if all(occ for occ in nonterminal_occurrences):
+                product = list(itertools.product(*nonterminal_occurrences))
+                matching_seqs = [
+                    seq for seq in product
+                    if (list(seq) == sorted(seq) and
+                        all(is_before(None, seq[idx], seq[idx + 1]) for idx in range(len(seq) - 1)))]
 
-                            new_formula = constructor(
-                                qfd_formula_w_mexpr_phs.bound_variable,
-                                qfd_formula_w_mexpr_phs.in_variable,
-                                qfd_formula_w_mexpr_phs.inner_formula,
-                                language.BindExpression(*mexpr_elements))
+                for matching_seq in matching_seqs:
+                    assert len(matching_seq) == len(nonterminal_types)
 
-                            stack.append(language.replace_formula(pattern, qfd_formula_w_mexpr_phs, new_formula))
+                    # We change node labels to be able to correctly identify variable positions in the tree.
+                    bind_expr_tree = tree
+                    for idx, path in enumerate(matching_seq):
+                        ntype = nonterminal_types[idx]
+                        bind_expr_tree = replace_path(
+                            bind_expr_tree,
+                            path,
+                            (ntype.replace(">", f"-{hash((ntype, idx))}>"), None))
 
-                    candidate_trees.extend(expand_tree(tree, self.canonical_grammar))
+                    # We prune too specific leaves of the tree: Each node that does not contain
+                    # a variable node as a child, and is an immediate child of a node containing
+                    # a variable node, is pruned away.
+                    non_var_paths = [path for path, _ in tree_leaves(bind_expr_tree)
+                                     if path not in matching_seq]
+
+                    for path in non_var_paths:
+                        if len(path) < 2:
+                            continue
+
+                        while len(path) > 1 and not any(
+                                len(path[:-1]) < len(var_path) and
+                                var_path[:len(path[:-1])] == path[:-1]
+                                for var_path in matching_seq):
+                            path = path[:-1]
+
+                        if len(path) > 0 and not any(
+                                len(path) < len(var_path) and
+                                var_path[:len(path)] == path
+                                for var_path in matching_seq):
+                            bind_expr_tree = replace_path(
+                                bind_expr_tree,
+                                path,
+                                (get_subtree(bind_expr_tree, path)[0], None))
+
+                    result.add(tree_to_string(bind_expr_tree, show_open_leaves=True))
+
+            candidate_trees.extend(expand_tree(tree, self.canonical_grammar))
 
         return result
 

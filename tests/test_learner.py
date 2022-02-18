@@ -79,7 +79,8 @@ forall <expr> use_ctx in start:
         correct_property = """
 forall <internal_reference> use_ctx="<presep>{<id> use}_<postsep>" in start:
   exists <labeled_paragraph> def_ctx=".. _{<id> def}:\n\n<paragraph>" in start:
-    (= use def)"""
+    ((different_position(use_ctx, def_ctx) and
+    (= use def))"""
 
         def prop(tree: language.DerivationTree) -> bool:
             return rest.render_rst(tree) is True
@@ -99,10 +100,14 @@ x
             for inp in raw_inputs]
 
         ##########
-        # candidates = generate_candidates(
+        # candidates = InvariantLearner(
+        #     rest.REST_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Def-Use (reST)"},
+        #     mexpr_expansion_limit=2
+        # ).generate_candidates(
         #     patterns_from_file()["Def-Use (reST)"],
         #     inputs,
-        #     rest.REST_GRAMMAR
         # )
         #
         # print(len(candidates))
@@ -118,6 +123,7 @@ x
             positive_examples=inputs,
             target_number_positive_samples=7,
             target_number_positive_samples_for_learning=4,
+            mexpr_expansion_limit=2,
             k=4,  # TODO: Consider *all* k-paths *up to* 4?
         ).learn_invariants()
 
