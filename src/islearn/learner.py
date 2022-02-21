@@ -1,3 +1,4 @@
+import copy
 import functools
 import io
 import itertools
@@ -7,7 +8,7 @@ import pkgutil
 import re
 from abc import ABC
 from functools import lru_cache
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence, Generator
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence, Generator, AbstractSet
 
 import isla.fuzzer
 import z3
@@ -17,7 +18,7 @@ from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
 from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean, \
-    visit_z3_expr
+    visit_z3_expr, ThreeValuedTruth
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
@@ -36,6 +37,113 @@ from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, 
 
 STANDARD_PATTERNS_REPO = "patterns.yaml"
 logger = logging.getLogger("learner")
+
+
+class TruthTableRow:
+    def __init__(
+            self,
+            formula: language.Formula,
+            inputs: Sequence[language.DerivationTree] = (),
+            eval_results: Sequence[ThreeValuedTruth] = ()):
+        self.formula = formula
+        self.inputs = list(inputs)
+        self.eval_results: List[ThreeValuedTruth] = list(eval_results)
+
+    def evaluate(self, grammar: Grammar, parallel: bool = False):
+        if parallel:
+            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+                self.eval_results = pool.map(
+                    lambda inp: evaluate(self.formula, inp, grammar).is_true(),
+                    self.inputs,
+                    chunksize=10
+                )
+        else:
+            self.eval_results = [evaluate(self.formula, inp, grammar) for inp in self.inputs]
+
+    def eval_result(self) -> float:
+        assert len(self.eval_results) == len(self.inputs)
+        assert all(entry != ThreeValuedTruth.unknown() for entry in self.eval_results)
+        return sum(bool(entry) for entry in self.eval_results) / len(self.eval_results)
+
+    def __repr__(self):
+        return f"TruthTableRow({repr(self.formula)}, {repr(self.inputs)}, {repr(self.eval_results)})"
+
+    def __str__(self):
+        return f"{self.formula}: {', '.join(map(str, self.eval_results))}"
+
+    def __eq__(self, other):
+        return (isinstance(other, TruthTableRow) and
+                self.formula == other.formula)
+
+    def __hash__(self):
+        return hash(self.formula)
+
+    def __neg__(self):
+        return TruthTableRow(
+            -self.formula,
+            self.inputs,
+            [-eval_result for eval_result in self.eval_results]
+        )
+
+    def __and__(self, other: 'TruthTableRow') -> 'TruthTableRow':
+        assert len(self.inputs) == len(other.inputs)
+        assert len(self.eval_results) == len(other.eval_results)
+        return TruthTableRow(
+            self.formula & other.formula,
+            self.inputs,
+            [a & b for a, b in zip(self.eval_results, other.eval_results)]
+        )
+
+    def __or__(self, other: 'TruthTableRow') -> 'TruthTableRow':
+        assert len(self.inputs) == len(other.inputs)
+        assert len(self.eval_results) == len(other.eval_results)
+        return TruthTableRow(
+            self.formula | other.formula,
+            self.inputs,
+            [a | b for a, b in zip(self.eval_results, other.eval_results)]
+        )
+
+
+class TruthTable:
+    def __init__(self, rows: Iterable[TruthTableRow] = ()):
+        self.rows = set(rows)
+
+    def __repr__(self):
+        return f"TruthTable({repr(self.rows)})"
+
+    def __str__(self):
+        return "\n".join(map(str, self.rows))
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __add__(self, other: 'TruthTable') -> 'TruthTable':
+        return TruthTable(self.rows | other.rows)
+
+    def __iadd__(self, other: 'TruthTable') -> 'TruthTable':
+        self.rows |= other.rows
+        return self
+
+    def __or__(self, other: Iterable[TruthTableRow]) -> 'TruthTable':
+        return TruthTable(self.rows | set(other))
+
+    def __ior__(self, other: Iterable[TruthTableRow]) -> 'TruthTable':
+        self.rows |= set(other)
+        return self
+
+    def evaluate(self, grammar: Grammar, columns_parallel: bool = False, rows_parallel: bool = False) -> 'TruthTable':
+        if columns_parallel:
+            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+                pool.map(
+                    lambda row: row.evaluate(grammar, rows_parallel),
+                    self.rows,
+                    chunksize=10
+                )
+        else:
+            for row in self.rows:
+                row.evaluate(grammar, rows_parallel)
+
+        return self
 
 
 class InvariantLearner:
@@ -59,7 +167,11 @@ class InvariantLearner:
                     "Nonterminal String in `count` Predicates Filter",
                     "String-to-Int Filter",
             ),
-            mexpr_expansion_limit: int = 5):
+            mexpr_expansion_limit: int = 5,
+            min_recall: float = .9,
+            min_precision: float = .6,
+            max_disjunction_depth: int = 2,
+            max_conjunction_depth: int = 3):
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)
         self.graph = gg.GrammarGraph.from_grammar(grammar)
@@ -67,6 +179,10 @@ class InvariantLearner:
         self.k = k
         self.filters = filters
         self.mexpr_expansion_limit = mexpr_expansion_limit
+        self.min_recall = min_recall
+        self.min_precision = min_precision
+        self.max_disjunction_depth = max_disjunction_depth
+        self.max_conjunction_depth = max_conjunction_depth
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -120,10 +236,15 @@ class InvariantLearner:
         #             chunksize=10
         #         ) if inv is not None]
 
-        invariants = [
-            inv for inv in candidates
-            if all(evaluate(inv, inp, self.grammar).is_true() for inp in self.positive_examples)
-        ]
+        recall_truth_table = TruthTable([
+            TruthTableRow(inv, self.positive_examples)
+            for inv in candidates
+        ]).evaluate(self.grammar)
+
+        invariants = {
+            row.formula for row in recall_truth_table
+            if row.eval_result() == 1.0
+        }
 
         logger.info("%d invariants remain after filtering.", len(invariants))
 
@@ -136,23 +257,38 @@ class InvariantLearner:
 
         logger.info("Calculating precision.")
 
-        with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
-            eval_results = pool.map(
-                lambda t: (t[0], int(evaluate(t[0], t[1], self.grammar).is_true())),
-                itertools.product(invariants, self.negative_examples),
-                chunksize=10
-            )
+        precision_truth_table = TruthTable([
+            TruthTableRow(inv, self.negative_examples)
+            for inv in invariants
+        ]).evaluate(self.grammar)
+
+        conjunctive_precision_truthtable = copy.copy(precision_truth_table)
+        for level in range(2, self.max_conjunction_depth + 1):
+            conjunctive_precision_truthtable |= {
+                functools.reduce(TruthTableRow.__and__, rows)
+                for rows in itertools.product(*[precision_truth_table for _ in range(level)])
+                if all(row_1 != row_2
+                       for idx_1, row_1 in enumerate(rows)
+                       for idx_2, row_2 in enumerate(rows)
+                       if idx_1 != idx_2)
+                and all(functools.reduce(TruthTableRow.__and__, rows).eval_result() < row.eval_result()
+                        for row in rows)
+            }
+
+        precision_truth_table = conjunctive_precision_truthtable
 
         result: Dict[language.Formula, float] = {
-            inv: 1 - (sum([eval_result for other_inv, eval_result in eval_results if other_inv == inv])
-                      / len(self.negative_examples))
-            for inv in invariants
+            row.formula: 1 - row.eval_result()
+            for row in precision_truth_table
         }
 
         logger.info("Found %d invariants with non-zero precision.", len([p for p in result.values() if p > 0]))
 
+        # TODO Also sort by size of formula
         return dict(cast(List[Tuple[language.Formula, float]],
-                         sorted(result.items(), key=lambda p: p[1], reverse=True)))
+                         sorted(result.items(),
+                                key=lambda p: (p[1], -len(language.split_conjunction(p[0]))),
+                                reverse=True)))
 
     def generate_candidates(
             self,
@@ -679,14 +815,14 @@ class InvariantLearner:
         # For strings representing floats, we also include the rounded Integers.
         for fragments_set in fragments.values():
             fragments_set |= {
-                str(int(float(fragment)))
-                for fragment in fragments_set
-                if is_float(fragment) and not is_int(fragment)
-            } | {
-                str(int(float(fragment)) + 1)
-                for fragment in fragments_set
-                if is_float(fragment) and not is_int(fragment)
-            }
+                                 str(int(float(fragment)))
+                                 for fragment in fragments_set
+                                 if is_float(fragment) and not is_int(fragment)
+                             } | {
+                                 str(int(float(fragment)) + 1)
+                                 for fragment in fragments_set
+                                 if is_float(fragment) and not is_int(fragment)
+                             }
 
         result: Set[language.Formula] = set([])
         for inst_pattern in inst_patterns:
@@ -956,6 +1092,9 @@ class StringToIntFilter(PatternInstantiationFilter):
                     n_type = next(
                         var.n_type for var in free_vars
                         if var.name == get_child(str_to_int_expression).as_string())
+
+                    if n_type == language.Variable.NUMERIC_NTYPE:
+                        continue
 
                     trees = [t for _, t in inp.filter(lambda t: t.value == n_type)]
                     if not trees:
