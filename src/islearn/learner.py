@@ -8,7 +8,7 @@ import pkgutil
 import re
 from abc import ABC
 from functools import lru_cache
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence, Generator, AbstractSet
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
 
 import isla.fuzzer
 import z3
@@ -18,7 +18,7 @@ from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
 from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean, \
-    visit_z3_expr, ThreeValuedTruth
+    visit_z3_expr
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
@@ -26,7 +26,7 @@ from isla.type_defs import Grammar, ParseTree
 from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
-from islearn.helpers import parallel_all, connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
+from islearn.helpers import connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
     is_int, is_float
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
@@ -44,26 +44,58 @@ class TruthTableRow:
             self,
             formula: language.Formula,
             inputs: Sequence[language.DerivationTree] = (),
-            eval_results: Sequence[ThreeValuedTruth] = ()):
+            eval_results: Sequence[bool] = ()):
         self.formula = formula
         self.inputs = list(inputs)
-        self.eval_results: List[ThreeValuedTruth] = list(eval_results)
+        self.eval_results: List[bool] = list(eval_results)
 
-    def evaluate(self, grammar: Grammar, parallel: bool = False):
-        if parallel:
+    def evaluate(
+            self,
+            grammar: Grammar,
+            columns_parallel: bool = False,
+            lazy: bool = False,
+            result_threshold: float = .9) -> 'TruthTableRow':
+        """If lazy is True, then the evaluation stops as soon as result_threshold can no longer be
+        reached. E.g., if result_threshold is .9 and there are 100 inputs, then after more than
+        10 negative results, 90% positive results is no longer possible."""
+
+        if columns_parallel:
             with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
-                self.eval_results = pool.map(
+                iterator = pool.imap(
                     lambda inp: evaluate(self.formula, inp, grammar).is_true(),
                     self.inputs,
-                    chunksize=10
-                )
+                    chunksize=10)
+
+                self.eval_results = []
+                negative_results = 0
+                for eval_result in iterator:
+                    if lazy and negative_results > len(self.inputs) * (1 - result_threshold):
+                        self.eval_results += [False for _ in range(len(self.inputs) - len(self.eval_results))]
+                        break
+
+                    if not eval_result:
+                        negative_results += 1
+                    self.eval_results.append(eval_result)
         else:
-            self.eval_results = [evaluate(self.formula, inp, grammar) for inp in self.inputs]
+            self.eval_results = []
+            negative_results = 0
+            for inp in self.inputs:
+                if lazy and negative_results > len(self.inputs) * (1 - result_threshold):
+                    self.eval_results += [False for _ in range(len(self.inputs) - len(self.eval_results))]
+                    break
+
+                eval_result = evaluate(self.formula, inp, grammar).is_true()
+                if not eval_result:
+                    negative_results += 1
+                self.eval_results.append(eval_result)
+
+        return self
 
     def eval_result(self) -> float:
+        assert len(self.inputs) > 0
         assert len(self.eval_results) == len(self.inputs)
-        assert all(entry != ThreeValuedTruth.unknown() for entry in self.eval_results)
-        return sum(bool(entry) for entry in self.eval_results) / len(self.eval_results)
+        assert all(isinstance(entry, bool) for entry in self.eval_results)
+        return sum(int(entry) for entry in self.eval_results) / len(self.eval_results)
 
     def __repr__(self):
         return f"TruthTableRow({repr(self.formula)}, {repr(self.inputs)}, {repr(self.eval_results)})"
@@ -82,7 +114,7 @@ class TruthTableRow:
         return TruthTableRow(
             -self.formula,
             self.inputs,
-            [-eval_result for eval_result in self.eval_results]
+            [not eval_result for eval_result in self.eval_results]
         )
 
     def __and__(self, other: 'TruthTableRow') -> 'TruthTableRow':
@@ -91,7 +123,7 @@ class TruthTableRow:
         return TruthTableRow(
             self.formula & other.formula,
             self.inputs,
-            [a & b for a, b in zip(self.eval_results, other.eval_results)]
+            [a and b for a, b in zip(self.eval_results, other.eval_results)]
         )
 
     def __or__(self, other: 'TruthTableRow') -> 'TruthTableRow':
@@ -100,7 +132,7 @@ class TruthTableRow:
         return TruthTableRow(
             self.formula | other.formula,
             self.inputs,
-            [a | b for a, b in zip(self.eval_results, other.eval_results)]
+            [a or b for a, b in zip(self.eval_results, other.eval_results)]
         )
 
 
@@ -131,17 +163,29 @@ class TruthTable:
         self.rows |= set(other)
         return self
 
-    def evaluate(self, grammar: Grammar, columns_parallel: bool = False, rows_parallel: bool = False) -> 'TruthTable':
-        if columns_parallel:
+    def evaluate(
+            self,
+            grammar: Grammar,
+            columns_parallel: bool = False,
+            rows_parallel: bool = False,
+            lazy: bool = False,
+            result_threshold: float = .9) -> 'TruthTable':
+        """If lazy is True, then column evaluation stops as soon as result_threshold can no longer be
+        reached. E.g., if result_threshold is .9 and there are 100 inputs, then after more than
+        10 negative results, 90% positive results is no longer possible."""
+
+        assert not columns_parallel or not rows_parallel
+
+        if rows_parallel:
             with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
-                pool.map(
-                    lambda row: row.evaluate(grammar, rows_parallel),
+                self.rows = set(pool.map(
+                    lambda row: row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold),
                     self.rows,
                     chunksize=10
-                )
+                ))
         else:
             for row in self.rows:
-                row.evaluate(grammar, rows_parallel)
+                row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold)
 
         return self
 
@@ -170,8 +214,8 @@ class InvariantLearner:
             mexpr_expansion_limit: int = 5,
             min_recall: float = .9,
             min_precision: float = .6,
-            max_disjunction_depth: int = 2,
-            max_conjunction_depth: int = 3):
+            max_disjunction_size: int = 1,
+            max_conjunction_size: int = 2):
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)
         self.graph = gg.GrammarGraph.from_grammar(grammar)
@@ -181,8 +225,8 @@ class InvariantLearner:
         self.mexpr_expansion_limit = mexpr_expansion_limit
         self.min_recall = min_recall
         self.min_precision = min_precision
-        self.max_disjunction_depth = max_disjunction_depth
-        self.max_conjunction_depth = max_conjunction_depth
+        self.max_disjunction_size = max_disjunction_size
+        self.max_conjunction_size = max_conjunction_size
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -213,6 +257,8 @@ class InvariantLearner:
     def learn_invariants(self) -> Dict[language.Formula, float]:
         self._generate_more_inputs()
         assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
+        assert all(self.prop(positive_example) for positive_example in self.positive_examples)
+        assert all(not self.prop(negative_example) for negative_example in self.negative_examples)
 
         candidates = self.generate_candidates(self.patterns, self.positive_examples_for_learning)
         logger.info("Found %d invariant candidates.", len(candidates))
@@ -239,14 +285,50 @@ class InvariantLearner:
         recall_truth_table = TruthTable([
             TruthTableRow(inv, self.positive_examples)
             for inv in candidates
-        ]).evaluate(self.grammar)
+        ]).evaluate(
+            self.grammar,
+            rows_parallel=True,
+            lazy=self.max_disjunction_size < 2,
+            result_threshold=self.min_recall)
+
+        if self.max_disjunction_size > 1:
+            logger.info("Calculating recall of Boolean combinations.")
+
+            disjunctive_precision_truthtable = copy.copy(recall_truth_table)
+            # TODO: Find a way to deal with negations that does not induce many spurious invariants.
+            #       Problem: Negation might have bad recall, that is improved by building a disjunction...
+            #       Also, in the ALHAZEN-SQRT example, this gave rise to negated invs with meaningless
+            #       constants, so we might have to control this somehow, at least with a config param.
+            # disjunctive_precision_truthtable |= {-row for row in recall_truth_table}
+            for level in range(2, self.max_disjunction_size + 1):
+                logger.debug(f"Disjunction size: {level}")
+                for rows in itertools.product(*[recall_truth_table for _ in range(level)]):
+                    if not all(row_1 != row_2
+                               for idx_1, row_1 in enumerate(rows)
+                               for idx_2, row_2 in enumerate(rows)
+                               if idx_1 != idx_2):
+                        continue
+
+                    conjunction = functools.reduce(TruthTableRow.__or__, rows)
+                    new_eval_result = conjunction.eval_result()
+                    if not all(new_eval_result > row.eval_result() for row in rows):
+                        continue
+
+                    disjunctive_precision_truthtable.rows.add(conjunction)
+
+            recall_truth_table = disjunctive_precision_truthtable
+
+        # TODO: Prefer stronger invariants, if any: Formulas with *the same* quantifier blocks imply each
+        #       other if the qfr-free cores imply each other. If a stronger inv has the same recall than
+        #       a weaker one, drop the weaker one. This is basically a static precision filter.
 
         invariants = {
             row.formula for row in recall_truth_table
-            if row.eval_result() == 1.0
+            if row.eval_result() >= self.min_recall
         }
 
         logger.info("%d invariants remain after filtering.", len(invariants))
+        # logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
         # ne_before = len(negative_examples)
         # negative_examples.update(generate_counter_examples_from_formulas(grammar, prop, invariants))
@@ -255,40 +337,48 @@ class InvariantLearner:
         #     len(negative_examples) - ne_before
         # )
 
-        logger.info("Calculating precision.")
+        logger.info("Evaluating precision.")
+        # logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
 
         precision_truth_table = TruthTable([
             TruthTableRow(inv, self.negative_examples)
             for inv in invariants
-        ]).evaluate(self.grammar)
+        ]).evaluate(self.grammar, rows_parallel=False)
+
+        logger.info("Calculating precision of Boolean combinations.")
 
         conjunctive_precision_truthtable = copy.copy(precision_truth_table)
-        for level in range(2, self.max_conjunction_depth + 1):
-            conjunctive_precision_truthtable |= {
-                functools.reduce(TruthTableRow.__and__, rows)
-                for rows in itertools.product(*[precision_truth_table for _ in range(level)])
-                if all(row_1 != row_2
-                       for idx_1, row_1 in enumerate(rows)
-                       for idx_2, row_2 in enumerate(rows)
-                       if idx_1 != idx_2)
-                and all(functools.reduce(TruthTableRow.__and__, rows).eval_result() < row.eval_result()
-                        for row in rows)
-            }
+        for level in range(2, self.max_conjunction_size + 1):
+            logger.debug(f"Conjunction size: {level}")
+            for rows in itertools.product(*[precision_truth_table for _ in range(level)]):
+                if not all(row_1 != row_2
+                           for idx_1, row_1 in enumerate(rows)
+                           for idx_2, row_2 in enumerate(rows)
+                           if idx_1 != idx_2):
+                    continue
+
+                conjunction = functools.reduce(TruthTableRow.__and__, rows)
+                new_eval_result = conjunction.eval_result()
+                if not all(new_eval_result < row.eval_result() for row in rows):
+                    continue
+
+                conjunctive_precision_truthtable.rows.add(conjunction)
 
         precision_truth_table = conjunctive_precision_truthtable
 
         result: Dict[language.Formula, float] = {
-            row.formula: 1 - row.eval_result()
+            language.ensure_unique_bound_variables(row.formula): 1 - row.eval_result()
             for row in precision_truth_table
+            if 1 - row.eval_result() >= self.min_precision
         }
 
         logger.info("Found %d invariants with non-zero precision.", len([p for p in result.values() if p > 0]))
 
-        # TODO Also sort by size of formula
-        return dict(cast(List[Tuple[language.Formula, float]],
-                         sorted(result.items(),
-                                key=lambda p: (p[1], -len(language.split_conjunction(p[0]))),
-                                reverse=True)))
+        return dict(
+            cast(List[Tuple[language.Formula, float]],
+                 sorted(result.items(),
+                        key=lambda p: (p[1], -len(language.split_conjunction(p[0]))),
+                        reverse=True)))
 
     def generate_candidates(
             self,

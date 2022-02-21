@@ -1,6 +1,7 @@
 import copy
 import json
 import math
+import re
 import string
 import unittest
 
@@ -71,7 +72,7 @@ forall <expr> use_ctx in start:
         ).learn_invariants()
 
         # print(len(result))
-        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
         self.assertIn(
             correct_property.strip(),
@@ -114,7 +115,7 @@ x
         # )
         #
         # print(len(candidates))
-        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        # print("\n\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
         #
         # return
         ##########
@@ -128,6 +129,8 @@ x
             target_number_positive_samples_for_learning=4,
             mexpr_expansion_limit=2,
             k=4,  # TODO: Consider *all* k-paths *up to* 4?
+            max_conjunction_size=1,
+            min_precision=.0,
         ).learn_invariants()
 
         print(len(result))
@@ -277,7 +280,7 @@ forall <json> container in start:
 
         inputs = [
             ' { "key" : 13 } ',
-            # ' { "asdf" : [ 26 ] , "key" : "x" } ',
+            ' { "asdf" : [ 26 ] , "key" : "x" } ',
         ]
         trees = [language.DerivationTree.from_parse_tree(next(EarleyParser(self.json_grammar).parse(inp)))
                  for inp in inputs]
@@ -299,7 +302,8 @@ forall <json> container in start:
             self.json_grammar,
             prop,
             activated_patterns={"String Existence"},
-            positive_examples=trees
+            positive_examples=trees,
+            max_conjunction_size=1
         ).learn_invariants()
 
         print(len(result))
@@ -309,16 +313,23 @@ forall <json> container in start:
             correct_property.strip(),
             list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p > .0])))
 
+    # @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_alhazen_sqrt_example(self):
         correct_property_1 = """
-forall <arith_expr> container in start:
-  exists <function> elem in container:
-    (= elem "sqrt")"""
+(forall <arith_expr> container in start:
+   exists <maybe_minus> elem in container:
+     (= elem "-") and
+forall <arith_expr> container_0 in start:
+  exists <function> elem_0 in container_0:
+    (= elem_0 "sqrt"))"""
 
-        correct_property_2 = """
-forall <arith_expr> container in start:
-  exists <number> elem in container:
-    (<= (str.to.int elem) (str.to.int "-1"))"""
+        correct_property_2_re = re.escape("""
+(forall <arith_expr> container in start:
+   exists <function> elem in container:
+     (= elem "sqrt") and
+forall <arith_expr> container_0 in start:
+  exists <number> elem_0 in container_0:
+    (<= (str.to.int elem_0) (str.to.int "-""".strip()) + r"[1-9][0-9]*" + re.escape('")))')
 
         grammar = {
             "<start>": ["<arith_expr>"],
@@ -366,13 +377,12 @@ forall <arith_expr> container in start:
         #############
 
         self.assertTrue(all(evaluate(correct_property_1, tree, grammar) for tree in trees))
-        self.assertTrue(all(evaluate(correct_property_2, tree, grammar) for tree in trees))
 
         result = InvariantLearner(
             grammar,
             prop,
-            # activated_patterns={"Number Upper Bound"},
-            activated_patterns={"String Existence"},
+            activated_patterns={"Number Upper Bound", "String Existence"},
+            # activated_patterns={"String Existence"},
             positive_examples=trees
         ).learn_invariants()
 
@@ -385,8 +395,10 @@ forall <arith_expr> container in start:
         nonzero_precision_results = list(map(
             lambda f: ISLaUnparser(f).unparse(),
             [r for r, p in result.items() if p > .0]))
+
         self.assertIn(correct_property_1.strip(), nonzero_precision_results)
-        # self.assertIn(correct_property_2.strip(), nonzero_precision_results)
+
+        self.assertTrue(any(re.match(correct_property_2_re, r) for r in nonzero_precision_results))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()
