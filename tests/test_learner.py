@@ -232,19 +232,19 @@ exists int num:
             return evaluate(correct_property, tree, csv.CSV_GRAMMAR).is_true()
 
         ##################
-        inputs = list(map(
-            lambda inp: language.DerivationTree.from_parse_tree(next(EarleyParser(csv.CSV_GRAMMAR).parse(inp))),
-            ["a;b;c\n", "a;b\nc;d\n"]))
-
-        result = InvariantLearner(
-            csv.CSV_GRAMMAR,
-            prop,
-            activated_patterns={"Equal Count"},
-        ).generate_candidates(patterns_from_file()["Equal Count"], inputs)
-
-        print(len(result))
-        print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), result)))
-        return
+        # inputs = list(map(
+        #     lambda inp: language.DerivationTree.from_parse_tree(next(EarleyParser(csv.CSV_GRAMMAR).parse(inp))),
+        #     ["a;b;c\n", "a;b\nc;d\n"]))
+        #
+        # result = InvariantLearner(
+        #     csv.CSV_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Equal Count"},
+        # ).generate_candidates(patterns_from_file()["Equal Count"], inputs)
+        #
+        # print(len(result))
+        # print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), result)))
+        # return
         ##################
 
         result = InvariantLearner(
