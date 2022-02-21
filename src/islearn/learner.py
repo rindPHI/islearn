@@ -109,20 +109,6 @@ class InvariantLearner:
 
         # Only consider *real* invariants
 
-        def safe_evaluate(formula: language.Formula, inp: language.DerivationTree) -> bool:
-            try:
-                return evaluate(formula, inp, self.grammar).is_true()
-            except Exception as e:
-                logger.debug(
-                    "Exception (%s) occurred when evaluating formula %s with input %s:\n%s",
-                    type(e).__name__,
-                    language.ISLaUnparser(formula).unparse(),
-                    str(inp),
-                    str(e)
-                )
-                return False
-
-
         # invariants = list(candidates)
         # test_inputs = list(self.positive_examples)
         # while invariants and test_inputs:
@@ -136,7 +122,7 @@ class InvariantLearner:
 
         invariants = [
             inv for inv in candidates
-            if all(safe_evaluate(inv, inp) for inp in self.positive_examples)
+            if all(evaluate(inv, inp, self.grammar).is_true() for inp in self.positive_examples)
         ]
 
         logger.info("%d invariants remain after filtering.", len(invariants))
@@ -152,7 +138,7 @@ class InvariantLearner:
 
         with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
             eval_results = pool.map(
-                lambda t: (t[0], int(safe_evaluate(t[0], t[1]))),
+                lambda t: (t[0], int(evaluate(t[0], t[1], self.grammar).is_true())),
                 itertools.product(invariants, self.negative_examples),
                 chunksize=10
             )
