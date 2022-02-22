@@ -1,9 +1,11 @@
-import io
 import itertools
+import math
 from functools import reduce
 from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict, Sequence
 
 import isla.language
+from isla import language
+from isla.type_defs import Path
 from pathos import multiprocessing as pmp
 
 S = TypeVar("S")
@@ -20,8 +22,8 @@ def is_int(maybe_int: str) -> bool:
 
 def is_float(maybe_float: str) -> bool:
     try:
-        float(maybe_float)
-        return True
+        f = float(maybe_float)
+        return not math.isinf(f) and not math.isnan(f)
     except ValueError:
         return False
 
@@ -155,24 +157,24 @@ def all_interleavings(a: Sequence[S], b: Sequence[T]) -> List[List[S | T]]:
     return slots
 
 
-def construct_multiple(constructor: Callable[..., T], args: List[Iterable]) -> Set[T]:
+def construct_multiple(constructor: Callable[..., T], args: List[Iterable]) -> List[T]:
     """
     :param constructor: Constructor to apply to individual arguments.
     :param args: List of different argument options. Length of outer list must match cardinality of constructor.
     :return: Instantiated objects for the different possibilities.
     """
 
-    return {constructor(*combination) for combination in itertools.product(*args)}
+    return [constructor(*combination) for combination in itertools.product(*args)]
 
 
-def reduce_multiple(function: Callable[[T], T], sequence: List[Iterable[T]]) -> Set[T]:
-    return {reduce(function, combination) for combination in itertools.product(*sequence)}
+def reduce_multiple(function: Callable[[T], T], sequence: List[Iterable[T]]) -> List[T]:
+    return [reduce(function, combination) for combination in itertools.product(*sequence)]
 
 
 def replace_formula_by_formulas(
         in_formula: isla.language.Formula,
         to_replace: Callable[[isla.language.Formula], Optional[Iterable[isla.language.Formula]]]
-) -> Set[isla.language.Formula]:
+) -> List[isla.language.Formula]:
     """
     Replaces a formula inside a conjunction or disjunction.
     to_replace is either (1) a formula to replace, or (2) a predicate which holds if the given formula
@@ -183,7 +185,7 @@ def replace_formula_by_formulas(
 
     maybe_results = to_replace(in_formula)
     if maybe_results is not None:
-        return {r for result in maybe_results for r in replace_formula_by_formulas(result, to_replace)}
+        return [r for result in maybe_results for r in replace_formula_by_formulas(result, to_replace)]
 
     if isinstance(in_formula, isla.language.ConjunctiveFormula):
         return reduce_multiple(lambda a, b: a & b, [
@@ -194,10 +196,10 @@ def replace_formula_by_formulas(
             replace_formula_by_formulas(child, to_replace)
             for child in in_formula.args])
     elif isinstance(in_formula, isla.language.NegatedFormula):
-        return {
+        return [
             -child_result
             for child_result in replace_formula_by_formulas(in_formula.args[0], to_replace)
-        }
+        ]
     elif isinstance(in_formula, isla.language.ForallFormula):
         in_formula: isla.language.ForallFormula
         return construct_multiple(
@@ -235,18 +237,25 @@ def replace_formula_by_formulas(
                 inner_formula),
             [replace_formula_by_formulas(in_formula.inner_formula, to_replace)])
 
-    return {in_formula}
+    return [in_formula]
 
 
 def tree_in(tree: isla.language.DerivationTree, iterable: Iterable[isla.language.DerivationTree]) -> bool:
     return any(tree.structurally_equal(t) for t in iterable)
 
 
-def parse_yaml(content: str) -> list | dict | str:
-    from yaml import load
-    try:
-        from yaml import CLoader as Loader
-    except ImportError:
-        from yaml import Loader
+class BinaryDerivationTreeNode:
+    def __init__(
+            self,
+            value: str,
+            orig_path: Path,
+            left: Optional['BinaryDerivationTreeNode'],
+            right: Optional['BinaryDerivationTreeNode']):
+        self.value = value
+        self.orig_path = orig_path
+        self.left = left
+        self.right = right
 
-    return load(io.StringIO(content), Loader=Loader)
+
+def convert_derivation_tree_to_binary(tree: language.DerivationTree) -> BinaryDerivationTreeNode:
+    pass

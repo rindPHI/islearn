@@ -1,6 +1,5 @@
 import copy
 import functools
-import io
 import itertools
 import logging
 import os.path
@@ -11,6 +10,7 @@ from functools import lru_cache
 from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
 
 import isla.fuzzer
+import toml
 import z3
 from fuzzingbook.Parser import canonical
 from grammar_graph import gg
@@ -22,7 +22,7 @@ from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
-from isla.type_defs import Grammar, ParseTree
+from isla.type_defs import Grammar, ParseTree, Path
 from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
@@ -35,7 +35,7 @@ from islearn.mutation import MutationFuzzer
 from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree, tree_leaves, \
     get_subtree
 
-STANDARD_PATTERNS_REPO = "patterns.yaml"
+STANDARD_PATTERNS_REPO = "patterns.toml"
 logger = logging.getLogger("learner")
 
 
@@ -194,7 +194,7 @@ class InvariantLearner:
     def __init__(
             self,
             grammar: Grammar,
-            prop: Callable[[language.DerivationTree], bool],
+            prop: Optional[Callable[[language.DerivationTree], bool]] = None,
             positive_examples: Optional[Iterable[language.DerivationTree]] = None,
             negative_examples: Optional[Iterable[language.DerivationTree]] = None,
             patterns: Optional[List[language.Formula | str]] = None,
@@ -237,8 +237,8 @@ class InvariantLearner:
         self.target_number_positive_samples_for_learning = target_number_positive_samples_for_learning
         assert target_number_positive_samples >= target_number_positive_samples_for_learning
 
-        assert all(prop(example) for example in self.positive_examples)
-        assert all(not prop(example) for example in self.negative_examples)
+        assert not prop or all(prop(example) for example in self.positive_examples)
+        assert not prop or all(not prop(example) for example in self.negative_examples)
 
         # Also consider inverted patterns?
         assert not activated_patterns or not deactivated_patterns
@@ -255,10 +255,11 @@ class InvariantLearner:
                 for pattern in patterns]
 
     def learn_invariants(self) -> Dict[language.Formula, float]:
-        self._generate_more_inputs()
-        assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
-        assert all(self.prop(positive_example) for positive_example in self.positive_examples)
-        assert all(not self.prop(negative_example) for negative_example in self.negative_examples)
+        if self.prop:
+            self._generate_more_inputs()
+            assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
+            assert all(self.prop(positive_example) for positive_example in self.positive_examples)
+            assert all(not self.prop(negative_example) for negative_example in self.negative_examples)
 
         candidates = self.generate_candidates(self.patterns, self.positive_examples_for_learning)
         logger.info("Found %d invariant candidates.", len(candidates))
@@ -402,6 +403,8 @@ class InvariantLearner:
             else pattern
             for pattern in patterns]
 
+        inputs_subtrees: List[Dict[Path, language.DerivationTree]] = [dict(inp.paths()) for inp in inputs]
+
         result: Set[language.Formula] = set([])
 
         for pattern in patterns:
@@ -423,6 +426,9 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating match expression placeholders",
                          len(pattern_insts_without_mexpr_placeholders))
 
+            pattern_insts_without_mexpr_placeholders = self._apply_filters(
+                pattern_insts_without_mexpr_placeholders, filters, 0, inputs_subtrees)
+
             # 3. Nonterminal-String placeholders
             pattern_insts_without_nonterminal_string_placeholders = self._instantiate_nonterminal_string_placeholders(
                 pattern_insts_without_mexpr_placeholders)
@@ -430,9 +436,12 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
                          len(pattern_insts_without_nonterminal_string_placeholders))
 
+            pattern_insts_without_nonterminal_string_placeholders = self._apply_filters(
+                pattern_insts_without_nonterminal_string_placeholders, filters, 1, inputs_subtrees)
+
             # 4. String placeholders
             pattern_insts_without_string_placeholders = self._instantiate_string_placeholders(
-                pattern_insts_without_nonterminal_string_placeholders, inputs)
+                pattern_insts_without_nonterminal_string_placeholders, inputs_subtrees)
 
             logger.debug("Found %d instantiations of pattern after instantiating string placeholders",
                          len(pattern_insts_without_string_placeholders))
@@ -443,19 +452,33 @@ class InvariantLearner:
             pattern_insts_meeting_atom_requirements: Set[language.Formula] = \
                 set(pattern_insts_without_string_placeholders)
 
-            for pattern_filter in filters:
-                pattern_insts_meeting_atom_requirements = {
-                    pattern_inst for pattern_inst in pattern_insts_meeting_atom_requirements
-                    if pattern_filter.predicate(pattern_inst, inputs)
-                }
-
-                logger.debug("%d instantiations remaining after filter '%s'",
-                             len(pattern_insts_meeting_atom_requirements),
-                             pattern_filter.name)
+            pattern_insts_meeting_atom_requirements = self._apply_filters(
+                pattern_insts_meeting_atom_requirements, filters, 2, inputs_subtrees)
 
             result.update(pattern_insts_meeting_atom_requirements)
 
         return result
+
+    def _apply_filters(
+            self,
+            formulas: Set[language.Formula],
+            filters: List['PatternInstantiationFilter'],
+            order: int,
+            inputs: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
+        for pattern_filter in filters:
+            if not pattern_filter.order() == order:
+                continue
+
+            formulas = {
+                pattern_inst for pattern_inst in formulas
+                if pattern_filter.predicate(pattern_inst, inputs)
+            }
+
+            logger.debug("%d instantiations remaining after filter '%s'",
+                         len(formulas),
+                         pattern_filter.name)
+
+        return formulas
 
     def _create_input_reachability_relation(self, inputs: Iterable[language.DerivationTree]) -> Set[Tuple[str, str]]:
         nonterminal_paths: Set[Tuple[str, ...]] = {
@@ -886,33 +909,70 @@ class InvariantLearner:
     def _instantiate_string_placeholders(
             self,
             inst_patterns: Set[language.Formula],
-            inputs: Iterable[language.DerivationTree]) -> Set[language.Formula]:
+            inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
+        def substitute_string_placeholder(
+                inst: str, ph: PlaceholderVariable, formula: language.Formula) -> language.Formula | bool:
+            if not any(v == ph for v in formula.free_variables()
+                       if isinstance(v, StringPlaceholderVariable)):
+                return False
+
+            if isinstance(formula, language.SMTFormula):
+                return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
+                    ph.to_smt(): z3.StringVal(inst)
+                })), *[v for v in formula.free_variables() if v != ph])
+            elif isinstance(formula, language.StructuralPredicateFormula):
+                return language.StructuralPredicateFormula(
+                    formula.predicate,
+                    *[inst if arg == ph else arg for arg in formula.args]
+                )
+            elif isinstance(formula, language.SemanticPredicateFormula):
+                return language.SemanticPredicateFormula(
+                    formula.predicate,
+                    *[inst if arg == ph else arg for arg in formula.args]
+                )
+
+            return False
+
         if all(not isinstance(placeholder, StringPlaceholderVariable)
                for inst_pattern in inst_patterns
                for placeholder in get_placeholders(inst_pattern)):
             return inst_patterns
 
+        # TODO: Consider precise context for strings:
+        #         forall <array_table> container in start:
+        #           exists <unquoted_key> elem in container:
+        #             (= elem "name")
+        #       is not possible since no unquoted_key with "name" occurs
+        #       in an <array_table> key!
+
+        # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
+        #       "1234", don't include the <digits> "34". This might lead
+        #       to imprecision, but otherwise the search room tends to explode.
+
         fragments: Dict[str, Set[str]] = {
             nonterminal: {
-                str(subtree)
-                for inp in inputs
-                for _, subtree in inp.filter(lambda t: t.value == nonterminal)
-                if str(subtree)
+                str(tree)
+                for inp in inputs_subtrees
+                for path, tree in inp.items()
+                if (str(tree) and
+                    tree.value == nonterminal and
+                    not any(otree.value == tree.value
+                            for opath, otree in inp.items()
+                            if len(opath) < len(path) and
+                            opath == path[:len(opath)]))
             }
             for nonterminal in self.grammar
         }
 
         # For strings representing floats, we also include the rounded Integers.
         for fragments_set in fragments.values():
-            fragments_set |= {
-                                 str(int(float(fragment)))
-                                 for fragment in fragments_set
-                                 if is_float(fragment) and not is_int(fragment)
-                             } | {
-                                 str(int(float(fragment)) + 1)
-                                 for fragment in fragments_set
-                                 if is_float(fragment) and not is_int(fragment)
-                             }
+            fragments_set |= (
+                    {str(int(float(fragment)))
+                     for fragment in fragments_set
+                     if is_float(fragment) and not is_int(fragment)} |
+                    {str(int(float(fragment)) + 1)
+                     for fragment in fragments_set
+                     if is_float(fragment) and not is_int(fragment)})
 
         result: Set[language.Formula] = set([])
         for inst_pattern in inst_patterns:
@@ -927,38 +987,17 @@ class InvariantLearner:
 
                 non_ph_vars = {v for v in subformula.free_variables() if not isinstance(v, PlaceholderVariable)}
 
-                insts = functools.reduce(set.__or__, [fragments.get(var.n_type, set([])) for var in non_ph_vars])
+                insts: Set[str] = set(functools.reduce(
+                    set.__or__, [fragments.get(var.n_type, set([])) for var in non_ph_vars]))
 
                 ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariable)}
                 sub_result: Set[language.Formula] = {subformula}
                 for ph in ph_vars:
-                    old_sub_result = set(sub_result)
-                    sub_result = set([])
-                    for f in old_sub_result:
-                        for inst in insts:
-                            def substitute_string_placeholder(formula: language.Formula) -> language.Formula | bool:
-                                if not any(v == ph for v in formula.free_variables()
-                                           if isinstance(v, StringPlaceholderVariable)):
-                                    return False
-
-                                if isinstance(formula, language.SMTFormula):
-                                    return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
-                                        ph.to_smt(): z3.StringVal(inst)
-                                    })), *[v for v in formula.free_variables() if v != ph])
-                                elif isinstance(formula, language.StructuralPredicateFormula):
-                                    return language.StructuralPredicateFormula(
-                                        formula.predicate,
-                                        *[inst if arg == ph else arg for arg in formula.args]
-                                    )
-                                elif isinstance(formula, language.SemanticPredicateFormula):
-                                    return language.SemanticPredicateFormula(
-                                        formula.predicate,
-                                        *[inst if arg == ph else arg for arg in formula.args]
-                                    )
-
-                                return False
-
-                            sub_result.add(language.replace_formula(f, substitute_string_placeholder))
+                    sub_result = {
+                        language.replace_formula(f, functools.partial(substitute_string_placeholder, inst, ph))
+                        for f in set(sub_result)
+                        for inst in insts
+                    }
 
                 return sub_result
 
@@ -997,21 +1036,87 @@ class PatternInstantiationFilter(ABC):
     def __init__(self, name: str):
         self.name = name
 
+    def order(self) -> int:
+        """Currently: If 0, can be executed after all nonterminal types in quantifiers are fixed.
+        If 1, can only be executed after also all nonterminal string placeholders (in predicates)
+        have been instantiated. If 2, can only be executed after also all string placeholders
+        have been instantiated."""
+        raise NotImplementedError()
+
     def __eq__(self, other):
         return isinstance(other, PatternInstantiationFilter) and self.name == other.name
 
     def __hash__(self):
         return hash(self.name)
 
-    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
         raise NotImplementedError()
+
+
+class StructuralPredicatesFilter(PatternInstantiationFilter):
+    def __init__(self):
+        super().__init__("Structural Predicates Filter")
+
+    def order(self) -> int:
+        return 0
+
+    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
+        # TODO: This does not work properly when we have non-conjunctive cores! E.g., in a disjunction
+        #       or inside a negation, this filter is too restrictive.
+
+        # We approximate satisfaction of structural predicate formulas by searching
+        # inputs for subtrees with the right nonterminal types according to the argument
+        # types of the structural formulas.
+
+        structural_formulas: List[language.StructuralPredicateFormula] = cast(
+            List[language.StructuralPredicateFormula],
+            language.FilterVisitor(
+                lambda f: isinstance(f, language.StructuralPredicateFormula)).collect(formula))
+
+        if not structural_formulas:
+            return True
+
+        for inp_trees in inputs:
+            success = True
+            for structural_formula in structural_formulas:
+                arg_insts: Dict[language.Variable, List[Path]] = {}
+                for arg in structural_formula.free_variables():
+                    arg_insts[arg] = [path for path, subtree in inp_trees.items() if subtree.value == arg.n_type]
+
+                indices: Tuple[int, ...]
+                for indices in list(itertools.product(*[list(range(len(l))) for l in arg_insts.values()])):
+                    curr_insts: Dict[language.Variable, Path] = {}
+                    for var_idx, inst_idx in enumerate(indices):
+                        var = list(arg_insts.keys())[var_idx]
+                        curr_insts[var] = arg_insts[var][inst_idx]
+
+                    args_with_paths: List[str | Path] = [
+                        arg if isinstance(arg, str) else curr_insts[arg]
+                        for arg in structural_formula.args]
+
+                    if structural_formula.predicate.eval_fun(inp_trees[()], *args_with_paths):
+                        success = True
+                        break
+
+                    success = False
+
+                if not success:
+                    break
+
+            if success:
+                return True
+
+        return False
 
 
 class VariablesEqualFilter(PatternInstantiationFilter):
     def __init__(self):
         super().__init__("Variable Equality Filter")
 
-    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+    def order(self) -> int:
+        return 0
+
+    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
         # We approximate satisfaction of constraints "var1 == var2" by checking whether there is
         # at least one input with two equal subtrees of nonterminal types matching those of the
         # variables.
@@ -1021,13 +1126,14 @@ class VariablesEqualFilter(PatternInstantiationFilter):
                 lambda f: (isinstance(f, language.SMTFormula) and
                            z3.is_eq(f.formula) and
                            len(f.free_variables()) == 2 and
+                           all(isinstance(var, NonterminalPlaceholderVariable) for var in f.free_variables()) and
                            all(is_z3_var(child) for child in f.formula.children()))
             ).collect(formula))
 
         if not smt_equality_formulas:
             return True
 
-        for inp in inputs:
+        for inp_trees in inputs:
             success = True
 
             for smt_equality_formula in smt_equality_formulas:
@@ -1043,7 +1149,7 @@ class VariablesEqualFilter(PatternInstantiationFilter):
                     success = False
                     break
 
-                trees = inp.filter(lambda t: t.value == free_vars[0].n_type)
+                trees = [t for t in inp_trees.values() if t.value == free_vars[0].n_type]
 
                 if not any(
                         t1.value == free_vars[0].n_type and
@@ -1060,51 +1166,14 @@ class VariablesEqualFilter(PatternInstantiationFilter):
         return False
 
 
-class StructuralPredicatesFilter(PatternInstantiationFilter):
-    def __init__(self):
-        super().__init__("Structural Predicates Filter")
-
-    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
-        # TODO: This does not work properly when we have non-conjunctive cores! E.g., in a disjunction
-        #       or inside a negation, this filter is too restrictive.
-
-        # We approximate satisfaction of structural predicate formulas by searching
-        # inputs for subtrees with the right nonterminal types according to the argument
-        # types of the structural formulas.
-
-        structural_formulas: List[language.StructuralPredicateFormula] = cast(
-            List[language.StructuralPredicateFormula],
-            language.FilterVisitor(
-                lambda f: isinstance(f, language.StructuralPredicateFormula)).collect(formula))
-
-        if not structural_formulas:
-            return True
-
-        for inp in inputs:
-            success = True
-            for structural_formula in structural_formulas:
-                arg_insts: Dict[language.Variable, Set[language.DerivationTree]] = {}
-                for arg in structural_formula.free_variables():
-                    arg_insts[arg] = {t for _, t in inp.filter(lambda subtree: subtree.value == arg.n_type)}
-                arg_substitutions: List[Dict[language.Variable, language.DerivationTree]] = \
-                    dict_of_lists_to_list_of_dicts(arg_insts)
-
-                if not any(structural_formula.substitute_expressions(arg_substitution).evaluate(inp)
-                           for arg_substitution in arg_substitutions):
-                    success = False
-                    break
-
-            if success:
-                return True
-
-        return False
-
-
 class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
     def __init__(self, graph: gg.GrammarGraph, input_reachability_relation: Set[Tuple[str, str]]):
         super().__init__("Nonterminal String in `count` Predicates Filter")
         self.graph = graph
         self.input_reachability_relation = input_reachability_relation
+
+    def order(self) -> int:
+        return 1
 
     def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         return reachable(self.graph, from_nonterminal, to_nonterminal)
@@ -1112,7 +1181,7 @@ class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
     def reachable_in_inputs(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         return (from_nonterminal, to_nonterminal) in self.input_reachability_relation
 
-    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+    def predicate(self, formula: language.Formula, _: List[Dict[Path, language.DerivationTree]]) -> bool:
         # In `count(elem, nonterminal, num)` occurrences
         # 1. the nonterminal must be reachable from the nonterminal type of elem. We
         #    consider reachability as defined by the sample inputs, not the grammar,
@@ -1145,7 +1214,11 @@ class StringToIntFilter(PatternInstantiationFilter):
     def __init__(self):
         super().__init__("String-to-Int Filter")
 
-    def predicate(self, formula: language.Formula, inputs: Iterable[language.DerivationTree]) -> bool:
+    def order(self) -> int:
+        return 2
+
+    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
+        assert formula
         str_to_int_expressions_with_vars: List[Tuple[Set[z3.ExprRef], OrderedSet[language.Variable]]] = [
             (
                 {z3_expr for z3_expr in set(visit_z3_expr(cast(language.SMTFormula, smt_for).formula))
@@ -1172,7 +1245,7 @@ class StringToIntFilter(PatternInstantiationFilter):
         #      for universal / existential quantifiers if evaluation of inner formula yields
         #      an exception. Problem is str.to.int for nullable nonterminals.
 
-        for inp in inputs:
+        for inp_trees in inputs:
             success = True
             for str_to_int_expressions, free_vars in str_to_int_expressions_with_vars:
                 for str_to_int_expression in str_to_int_expressions:
@@ -1186,7 +1259,7 @@ class StringToIntFilter(PatternInstantiationFilter):
                     if n_type == language.Variable.NUMERIC_NTYPE:
                         continue
 
-                    trees = [t for _, t in inp.filter(lambda t: t.value == n_type)]
+                    trees = [t for t in inp_trees.values() if t.value == n_type]
                     if not trees:
                         success = False
                         break
@@ -1198,11 +1271,6 @@ class StringToIntFilter(PatternInstantiationFilter):
 
                 if not success:
                     break
-
-                # if not any(structural_formula.substitute_expressions(arg_substitution).evaluate(inp)
-                #            for arg_substitution in arg_substitutions):
-                #     success = False
-                #     break
 
             if success:
                 return True
@@ -1254,15 +1322,13 @@ def extract_top_level_constant(candidate):
 
 
 class PatternRepository:
-    DEFAULT_GROUP = "default"
-
-    def __init__(self, data: List[Dict[str, str]]):
+    def __init__(self, data: Dict[str, List[Dict[str, str]]]):
         self.groups: Dict[str, Dict[str, language.Formula]] = {}
-        for entry in data:
-            name = entry["name"]
-            group = entry.get("group", PatternRepository.DEFAULT_GROUP)
-            constraint = parse_abstract_isla(entry["constraint"])
-            self.groups.setdefault(group, {})[name] = constraint
+        for group_name, elements in data.items():
+            for entry in elements:
+                name = entry["name"]
+                constraint = parse_abstract_isla(entry["constraint"])
+                self.groups.setdefault(group_name, {})[name] = constraint
 
     def __getitem__(self, item: str) -> Set[language.Formula]:
         if item in self.groups:
@@ -1272,6 +1338,7 @@ class PatternRepository:
             if item in elements:
                 return {elements[item]}
 
+        logger.warning(f"Could not find pattern for query {item}.")
         return set([])
 
     def __contains__(self, item: str) -> bool:
@@ -1294,25 +1361,17 @@ class PatternRepository:
         result = ""
         for group in self.groups:
             for name in self.groups[group]:
-                result += f"- name: {name}\n"
-                if group != PatternRepository.DEFAULT_GROUP:
-                    result += f"  group: {group}\n"
-                result += "  constraint: |\n"
-                constraint_str = AbstractISLaUnparser(self.groups[group][name]).unparse()
-                constraint_str = "\n".join(["      " + line for line in constraint_str.split("\n")])
-                result += constraint_str
+                result += f"[[{group}]]\n\n"
+                result += f'name = "{name}"\n'
+                result += "constraint = '''\n"
+                result += AbstractISLaUnparser(self.groups[group][name]).unparse()
+                result += "\n'''"
                 result += "\n\n"
 
         return result.strip()
 
 
 def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> PatternRepository:
-    from yaml import load
-    try:
-        from yaml import CLoader as Loader
-    except ImportError:
-        from yaml import Loader
-
     if os.path.isfile(file_name):
         f = open(file_name, "r")
         contents = f.read()
@@ -1320,9 +1379,10 @@ def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> PatternReposi
     else:
         contents = pkgutil.get_data("islearn", STANDARD_PATTERNS_REPO).decode("UTF-8")
 
-    data = load(io.StringIO(contents), Loader=Loader)
-    assert isinstance(data, list)
+    data: Dict[str, List[Dict[str, str]]] = cast(Dict[str, List[Dict[str, str]]], toml.loads(contents))
+    assert isinstance(data, dict)
     assert len(data) > 0
-    assert all(isinstance(entry, dict) for entry in data)
+    assert all(isinstance(entry, str) for entry in data.keys())
+    assert all(isinstance(entry, list) for entry in data.values())
 
     return PatternRepository(data)
