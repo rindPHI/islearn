@@ -45,30 +45,40 @@
       exists <?NONTERMINAL> elem in container:
         (= elem <?STRING>)
 
-- name: Length (Equality)
+- name: Existence String Fixed Length
   group: Existential
   constraint: |
     forall <?NONTERMINAL> container in start:
       exists <?NONTERMINAL> elem in container:
         (= (str.len elem) (str.to.int <?STRING>))
 
-- name: Length Upper Bound
+- name: Existence String Max Length
   group: Existential
   constraint: |
     forall <?NONTERMINAL> container in start:
       exists <?NONTERMINAL> elem in container:
         (<= (str.len elem) (str.to.int <?STRING>))
 
-- name: Number Upper Bound
+- name: Existence Numeric String Smaller Than
   group: Existential
   constraint: |
     forall <?NONTERMINAL> container in start:
       exists <?NONTERMINAL> elem in container:
         (<= (str.to.int elem) (str.to.int <?STRING>))
 
-- name: Number Lower Bound
+- name: Existence Numeric String Larger Than
   group: Existential
   constraint: |
     forall <?NONTERMINAL> container in start:
       exists <?NONTERMINAL> elem in container:
         (>= (str.to.int elem) (str.to.int <?STRING>))
+
+- name: Existence Strings Relative Order
+  group: Existential
+  constraint: |
+    forall <?NONTERMINAL> container in start:
+      exists <?NONTERMINAL> occ_1 in container:
+        exists <?NONTERMINAL> occ_2 in container:
+          (before(occ_1, occ_2) and
+           (= occ_2 <?STRING>) and
+           (= occ_1 <?STRING>))
