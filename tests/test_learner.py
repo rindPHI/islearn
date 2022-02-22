@@ -1,21 +1,23 @@
 import copy
 import json
 import math
+import pkgutil
 import re
 import string
 import unittest
+from typing import List
 
 import pytest
 from fuzzingbook.Grammars import JSON_GRAMMAR, srange
 from fuzzingbook.Parser import EarleyParser
 from isla import language
 from isla.evaluator import evaluate
-from isla.helpers import delete_unreachable
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 
-from islearn.learner import patterns_from_file, InvariantLearner
+from islearn.helpers import parse_yaml
+from islearn.learner import patterns_from_file, InvariantLearner, STANDARD_PATTERNS_REPO
 
 
 class TestLearner(unittest.TestCase):
@@ -365,8 +367,8 @@ forall <arith_expr> container_0 in start:
         #     prop,
         #     positive_examples=trees
         # ).generate_candidates(
-        #     # list(repo["String Existence"] | (repo["Number Upper Bound"])),
-        #     repo["Number Upper Bound"],
+        #     # list(repo["String Existence"] | (repo["Existence Numeric String Smaller Than"])),
+        #     repo["Existence Numeric String Smaller Than"],
         #     trees
         # )
         #
@@ -381,7 +383,7 @@ forall <arith_expr> container_0 in start:
         result = InvariantLearner(
             grammar,
             prop,
-            activated_patterns={"Number Upper Bound", "String Existence"},
+            activated_patterns={"Existence Numeric String Smaller Than", "String Existence"},
             # activated_patterns={"String Existence"},
             positive_examples=trees
         ).learn_invariants()
@@ -399,6 +401,68 @@ forall <arith_expr> container_0 in start:
         self.assertIn(correct_property_1.strip(), nonzero_precision_results)
 
         self.assertTrue(any(re.match(correct_property_2_re, r) for r in nonzero_precision_results))
+
+    def test_learn_from_islearn_patterns_file(self):
+        islearn_repo_content = pkgutil.get_data("islearn", STANDARD_PATTERNS_REPO).decode("UTF-8")
+
+        simplified_yaml_grammar = {
+            "<start>": ["<yaml_document>"],
+            "<doc_elements>": ["<doc_element>", "<doc_element><doc_elements>"],
+            "<doc_element>": ["<list>", "<array>", "<string>"],
+            "<list>": ["<list_items>"],
+            "<list_items>": ["<list_item>", "<list_item><newlines><list_items>"],
+            "<list_item>": ["<optspaces>- <doc_element>"],
+            "<array>": ["<array_elements>"],
+            "<array_elements>": ["<array_element>", "<array_element><newlines><array_elements>"],
+            "<array_element>": ["<optspaces><string>: <string>"],
+            "<newlines>": ["\n", "\n<>"],
+            "<yaml_document>": ["<doc_elements>"],
+            "<optspaces>": ["", "<spaces>"],
+            "<spaces>": [" ", " <spaces>"],
+            "<string>": ["<chars>"],
+            "<chars>": ["<char>", "<char><chars>"],
+            "<char>": list(set(srange(string.printable)) - set(srange("\n-:\t")))
+        }
+
+        # TODO: Learn existence of keywords, maximum length of entries, etc.
+        # TODO: Make creation of more inputs configurable; with that, also use of property
+        #       should be configurable. That makes sense for config files, which might not
+        #       be properly validated (but rather, certain entries are looked for).
+
+        yaml_input = """
+- ab: cd
+  efg: h
+  i: j
+  
+
+- ab
+""".strip()
+
+        yaml_input = "- a: b\n  c: d\n- asdf"
+
+        def match(yaml_struct, tree: language.DerivationTree) -> bool:
+            pass
+
+        def find_right_parse_tree(inp: str, trees: List[language.DerivationTree]) -> language.DerivationTree:
+            parsed = parse_yaml(inp)
+            matching = [tree for tree in trees if match(parsed, tree)]
+            assert len(matching) == 1
+            return matching[0]
+
+        # tree = find_right_parse_tree(yaml_input, list(map(
+        #     language.DerivationTree.from_parse_tree,
+        #     EarleyParser(simplified_yaml_grammar).parse(yaml_input))))
+
+        for tree in map(
+                language.DerivationTree.from_parse_tree,
+                EarleyParser(simplified_yaml_grammar).parse(yaml_input)):
+            import os
+            command = "echo '" + tree.to_dot() + "' | pbcopy"
+            os.system(command)
+            os.system("render-dot.sh")
+
+        # tree = language.DerivationTree.from_parse_tree(
+        #     next(EarleyParser(simplified_yaml_grammar).parse(islearn_repo_content)))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

@@ -1,3 +1,4 @@
+import io
 import itertools
 from functools import reduce
 from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict, Sequence
@@ -239,3 +240,13 @@ def replace_formula_by_formulas(
 
 def tree_in(tree: isla.language.DerivationTree, iterable: Iterable[isla.language.DerivationTree]) -> bool:
     return any(tree.structurally_equal(t) for t in iterable)
+
+
+def parse_yaml(content: str) -> list | dict | str:
+    from yaml import load
+    try:
+        from yaml import CLoader as Loader
+    except ImportError:
+        from yaml import Loader
+
+    return load(io.StringIO(content), Loader=Loader)
