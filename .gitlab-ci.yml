@@ -6,15 +6,15 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 before_script:
-  - pip install --upgrade pip
-  - pip install --upgrade wheel
+  - pip install --prefix=$(python3 -m site --user-base) --no-cache-dir --upgrade pip
+  - pip install --prefix=$(python3 -m site --user-base) --no-cache-dir --upgrade wheel
+  - pip uninstall -y isla
   - cat requirements.txt | grep -v z3 > requirements_noz3.txt
-  - pip install --no-deps -r requirements_noz3.txt
+  - pip install --prefix=$(python3 -m site --user-base) --no-cache-dir --no-deps -r requirements_noz3.txt
 
 test:
   script:
-    #- pip install --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
-    - pip install --no-deps .
+    - pip install --no-cache-dir --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
     - python3 -m pytest -n 16 --html=report.html --self-contained-html
 
 build:
