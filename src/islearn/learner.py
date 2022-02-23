@@ -942,23 +942,56 @@ class InvariantLearner:
         #       This is rather arbitrary, but avoids finding all kinds of spurious invariants
         #       like "there is an 'e' in the text" which are likely to hold any many cases.
 
-        fragments: Dict[str, Set[str]] = {
-            nonterminal: {
-                str(tree)
-                for inp in inputs_subtrees
-                for path, tree in inp.items()
-                if (str(tree) and
-                    tree.value == nonterminal and
-                    not any(otree.value == tree.value
-                            for opath, otree in inp.items()
-                            if len(opath) < len(path) and
-                            opath == path[:len(opath)]))
-            }
-            for nonterminal in self.grammar
-            if not (len(self.grammar[nonterminal]) > trivial_fragments_exclusion_threshold and
-                    all(len(expansion) == 1 and not is_nonterminal(expansion[0])
-                        for expansion in self.canonical_grammar[nonterminal]))
-        }
+        # fragments: Dict[str, Set[str]] = {
+        #     nonterminal: {
+        #         str(tree)
+        #         for inp in inputs_subtrees
+        #         for path, tree in inp.items()
+        #         if (str(tree) and
+        #             tree.value == nonterminal and
+        #             not any(otree.value == tree.value
+        #                     for opath, otree in inp.items()
+        #                     if len(opath) < len(path) and
+        #                     opath == path[:len(opath)]))
+        #     }
+        #     for nonterminal in self.grammar
+        #     if not (len(self.grammar[nonterminal]) > trivial_fragments_exclusion_threshold and
+        #             all(len(expansion) == 1 and not is_nonterminal(expansion[0])
+        #                 for expansion in self.canonical_grammar[nonterminal]))
+        # }
+
+        fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
+
+        many_trivial_terminal_parents = [
+            nonterminal for nonterminal in self.grammar
+            if (len(self.grammar[nonterminal]) > trivial_fragments_exclusion_threshold and
+                all(len(expansion) == 1 and not is_nonterminal(expansion[0])
+                    for expansion in self.canonical_grammar[nonterminal]))
+        ]
+
+        for inp in inputs_subtrees:
+            remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(
+                sorted(cast(List[Tuple[Path, language.DerivationTree]], list(inp.items())),
+                       key=lambda p: len(p[0])))
+            handled_paths: Dict[str, Set[Path]] = {nonterminal: set([]) for nonterminal in self.grammar}
+            while remaining_paths:
+                path, tree = remaining_paths.pop(0)
+                if not is_nonterminal(tree.value):
+                    continue
+
+                if tree.value in many_trivial_terminal_parents:
+                    continue
+
+                tree_string = str(tree)
+                if not tree_string:
+                    continue
+
+                if any(len(opath) < len(path) and opath == path[:len(opath)]
+                       for opath in handled_paths[tree.value]):
+                    continue
+
+                handled_paths[tree.value].add(path)
+                fragments[tree.value].add(tree_string)
 
         # For strings representing floats, we also include the rounded Integers.
         for fragments_set in fragments.values():
@@ -977,6 +1010,10 @@ class InvariantLearner:
             key: values for key, values in fragments.items()
             if not (len(values) > trivial_fragments_exclusion_threshold and all(len(value) == 1 for value in values))
         }
+
+        logger.debug(
+            "Extracted %d language fragments from sample inputs",
+            sum(len(value) for value in fragments.values()))
 
         result: Set[language.Formula] = set([])
         for inst_pattern in inst_patterns:

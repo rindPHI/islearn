@@ -32,6 +32,22 @@ forall <?NONTERMINAL> attribute in start:
            (= prefix_use prefix_def)))
 '''
 
+[[Universal]]
+
+name = "String Length Upper Bound"
+constraint = '''
+forall <?NONTERMINAL> elem in start:
+  (<= (str.len elem) (str.to.int <?STRING>))
+'''
+
+[[Universal]]
+
+name = "String Length Lower Bound"
+constraint = '''
+forall <?NONTERMINAL> elem in start:
+  (>= (str.len elem) (str.to.int <?STRING>))
+'''
+
 [[Existential]]
 
 name = "String Existence"

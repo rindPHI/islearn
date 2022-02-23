@@ -1,29 +1,23 @@
-from typing import cast, Tuple
-
-import dill as pickle
 import copy
 import json
-import logging
 import math
-import os
-import pkgutil
 import re
 import string
 import unittest
+from typing import cast, Tuple
 
 import pytest
 from fuzzingbook.Grammars import JSON_GRAMMAR, srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
 from isla import language
 from isla.evaluator import evaluate
-from isla.fuzzer import GrammarCoverageFuzzer
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 
 from grammars import toml_grammar
-from islearn.learner import patterns_from_file, InvariantLearner, STANDARD_PATTERNS_REPO, StringEqualityFilter, \
-    create_input_reachability_relation
+from islearn.language import parse_abstract_isla
+from islearn.learner import patterns_from_file, InvariantLearner, StringEqualityFilter
 
 
 class TestLearner(unittest.TestCase):
@@ -425,26 +419,26 @@ forall <arith_expr> container_0 in start:
             trees.append(tree)
 
         ##############
-        # repo = patterns_from_file()
-        # candidates = InvariantLearner(
-        #     toml_grammar,
-        #     None,
-        #     positive_examples=trees
-        # ).generate_candidates(
-        #     repo["String Existence"],  # repo["Existence Strings Relative Order"]
-        #     trees
-        # )
-        #
-        # print(len(candidates))
-        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-        #
-        # return
+        repo = patterns_from_file()
+        candidates = InvariantLearner(
+            toml_grammar,
+            None,
+            positive_examples=trees
+        ).generate_candidates(
+            repo["Universal"],  # repo["String Existence"],  # repo["Existence Strings Relative Order"]
+            trees
+        )
+
+        print(len(candidates))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        return
         ##############
 
         result = InvariantLearner(
             toml_grammar,
             prop=None,
-            activated_patterns={"String Existence"},
+            activated_patterns={"String Existence", "Universal"},
             positive_examples=trees
         ).learn_invariants()
 
@@ -471,14 +465,26 @@ forall <document> container in start:
         self.assertIn(correct_property_1.strip(), nonzero_precision_results)
         self.assertIn(correct_property_2.strip(), nonzero_precision_results)
 
+    def test_str_len_ph_instantiation(self):
+        repo = patterns_from_file()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(repo)))[0])
+
+        pattern = parse_abstract_isla("""
+forall <name> elem in start:
+  (<= (str.len elem) (str.to.int <?STRING>))""")
+
+        result = InvariantLearner(
+            toml_grammar,
+            prop=None,
+        )._instantiate_string_placeholders(
+            {pattern}, [dict(tree.paths())]
+        )
+
+        print(len(result))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
+
     def test_string_equality_filter(self):
         repo = patterns_from_file()
-        # Only retain one constraint per group; too slow otherwise
-        repo.groups = {
-            g: dict([cast(Tuple[str, language.Formula], list(constraints.items())[0])])
-            for g, constraints in repo.groups.items()}
-
-        repo.groups = {"Def-Use": repo.groups["Def-Use"]}  # TODO: Remove
 
         islearn_repo_content = str(repo)
         tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(islearn_repo_content))[0])
