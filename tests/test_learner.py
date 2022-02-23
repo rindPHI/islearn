@@ -417,20 +417,22 @@ forall <arith_expr> container_0 in start:
             g: dict([cast(Tuple[str, language.Formula], list(constraints.items())[0])])
             for g, constraints in repo.groups.items()}
 
-        repo.groups = {"Def-Use": repo.groups["Def-Use"]}  # TODO: Remove
-
-        islearn_repo_content = str(repo)
-        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(islearn_repo_content))[0])
+        trees = []
+        for i in range(len(repo.groups)):
+            new_repo = copy.deepcopy(repo)
+            new_repo.groups = dict([list(repo.groups.items())[i]])
+            tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(new_repo)))[0])
+            trees.append(tree)
 
         ##############
         # repo = patterns_from_file()
         # candidates = InvariantLearner(
         #     toml_grammar,
         #     None,
-        #     positive_examples=[tree]
+        #     positive_examples=trees
         # ).generate_candidates(
-        #     repo["String Existence"],
-        #     [tree]
+        #     repo["String Existence"],  # repo["Existence Strings Relative Order"]
+        #     trees
         # )
         #
         # print(len(candidates))
@@ -443,7 +445,7 @@ forall <arith_expr> container_0 in start:
             toml_grammar,
             prop=None,
             activated_patterns={"String Existence"},
-            positive_examples=[tree]
+            positive_examples=trees
         ).learn_invariants()
 
         print(len(result))

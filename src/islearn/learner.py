@@ -18,7 +18,7 @@ from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
 from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean, \
-    visit_z3_expr
+    visit_z3_expr, is_nonterminal
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
@@ -933,6 +933,15 @@ class InvariantLearner:
         #       "1234", don't include the <digits> "34". This might lead
         #       to imprecision, but otherwise the search room tends to explode.
 
+        # 10 is the length of a typical <DIGIT> nonterminal expansion set, which
+        # is why those nonterminal fragments would not be pruned.
+        trivial_fragments_exclusion_threshold = 10
+
+        # NOTE: To reduce the search space, we also exclude fragments for nonterminals which
+        #       have more than `trivial_fragments_exclusion_threshold` terminal children.
+        #       This is rather arbitrary, but avoids finding all kinds of spurious invariants
+        #       like "there is an 'e' in the text" which are likely to hold any many cases.
+
         fragments: Dict[str, Set[str]] = {
             nonterminal: {
                 str(tree)
@@ -946,6 +955,9 @@ class InvariantLearner:
                             opath == path[:len(opath)]))
             }
             for nonterminal in self.grammar
+            if not (len(self.grammar[nonterminal]) > trivial_fragments_exclusion_threshold and
+                    all(len(expansion) == 1 and not is_nonterminal(expansion[0])
+                        for expansion in self.canonical_grammar[nonterminal]))
         }
 
         # For strings representing floats, we also include the rounded Integers.
@@ -957,6 +969,14 @@ class InvariantLearner:
                     {str(int(float(fragment)) + 1)
                      for fragment in fragments_set
                      if is_float(fragment) and not is_int(fragment)})
+
+        # NOTE: We also exclude fragment sets for nonterminals where the fragments consist
+        #       of more than trivial_fragments_exclusion_threshold, and only of, single
+        #       characters, for the same reason as explained above.
+        fragments = {
+            key: values for key, values in fragments.items()
+            if not (len(values) > trivial_fragments_exclusion_threshold and all(len(value) == 1 for value in values))
+        }
 
         result: Set[language.Formula] = set([])
         for inst_pattern in inst_patterns:
