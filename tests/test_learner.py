@@ -419,20 +419,20 @@ forall <arith_expr> container_0 in start:
             trees.append(tree)
 
         ##############
-        repo = patterns_from_file()
-        candidates = InvariantLearner(
-            toml_grammar,
-            None,
-            positive_examples=trees
-        ).generate_candidates(
-            repo["Universal"],  # repo["String Existence"],  # repo["Existence Strings Relative Order"]
-            trees
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     toml_grammar,
+        #     None,
+        #     positive_examples=trees
+        # ).generate_candidates(
+        #     repo["Universal"],  # repo["String Existence"],  # repo["Existence Strings Relative Order"]
+        #     trees
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##############
 
         result = InvariantLearner(
@@ -462,8 +462,18 @@ forall <document> container in start:
   exists <key> elem in container:
     (= elem "constraint")"""
 
+        correct_property_3 = """
+forall <key> elem in start:
+  (>= (str.len elem) (str.to.int "4"))"""
+
+        correct_property_4 = """
+forall <key> elem in start:
+  (<= (str.len elem) (str.to.int "11"))"""
+
         self.assertIn(correct_property_1.strip(), nonzero_precision_results)
         self.assertIn(correct_property_2.strip(), nonzero_precision_results)
+        self.assertIn(correct_property_3.strip(), nonzero_precision_results)
+        self.assertIn(correct_property_4.strip(), nonzero_precision_results)
 
     def test_str_len_ph_instantiation(self):
         repo = patterns_from_file()

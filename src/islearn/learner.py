@@ -490,10 +490,21 @@ class InvariantLearner:
             if not pattern_filter.order() == order:
                 continue
 
-            formulas = {
-                pattern_inst for pattern_inst in formulas
-                if pattern_filter.predicate(pattern_inst, inputs)
-            }
+            # formulas = {
+            #     pattern_inst for pattern_inst in formulas
+            #     if pattern_filter.predicate(pattern_inst, inputs)
+            # }
+
+            formulas = list(formulas)
+
+            with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+                eval_results = list(pool.map(
+                    lambda pattern_inst: int(pattern_filter.predicate(pattern_inst, inputs)),
+                    formulas,
+                    chunksize=len(formulas) // pmp.cpu_count()
+                ))
+
+            formulas = set(itertools.compress(formulas, eval_results))
 
             logger.debug("%d instantiations remaining after filter '%s'",
                          len(formulas),
