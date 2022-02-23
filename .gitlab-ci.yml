@@ -25,6 +25,8 @@ build:
       - dist/*.whl
 
 docker-build-master:
+  tags:
+    - docker
   image: docker:latest
   stage: build
   services:
