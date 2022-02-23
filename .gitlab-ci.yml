@@ -13,7 +13,8 @@ before_script:
 
 test:
   script:
-    - pip install --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
+    #- pip install --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
+    - pip install --no-deps .
     - python3 -m pytest -n 16 --html=report.html --self-contained-html
 
 build:

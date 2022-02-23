@@ -142,7 +142,7 @@ x
             correct_property.strip(),
             map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
 
-    @pytest.mark.flaky(reruns=3, reruns_delay=2)
+    @pytest.mark.flaky(reruns=5, reruns_delay=2)
     def test_learn_invariants_mexpr_xml(self):
         correct_property = """
 forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in start:
@@ -156,16 +156,21 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
             "<b>xyz<c/><x>X</x></b>",
             "<a/>"
         ]
+
         inputs = [
             language.DerivationTree.from_parse_tree(
                 next(EarleyParser(xml_lang.XML_GRAMMAR).parse(inp)))
             for inp in raw_inputs]
 
         ##########
-        # candidates = generate_candidates(
+        # candidates = InvariantLearner(
+        #     xml_lang.XML_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Balance"},
+        #     positive_examples=inputs
+        # ).generate_candidates(
         #     patterns_from_file()["Balance"],
-        #     inputs,
-        #     xml_lang.XML_GRAMMAR
+        #     inputs
         # )
         #
         # print(len(candidates))
