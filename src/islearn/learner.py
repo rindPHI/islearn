@@ -27,7 +27,7 @@ from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
 from islearn.helpers import connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
-    is_int, is_float
+    is_int, is_float, non_consecutive_ordered_sub_sequences
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
@@ -210,6 +210,7 @@ class InvariantLearner:
                     "Variable Equality Filter",
                     "Nonterminal String in `count` Predicates Filter",
                     "String-to-Int Filter",
+                    "String Equality Filter",
             ),
             mexpr_expansion_limit: int = 5,
             min_recall: float = .9,
@@ -231,6 +232,7 @@ class InvariantLearner:
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
         self.negative_examples: List[language.DerivationTree] = list(set(negative_examples or []))
+        self.positive_examples_for_learning: List[language.DerivationTree] = []
 
         self.target_number_positive_samples = target_number_positive_samples
         self.target_number_negative_samples = target_number_negative_samples
@@ -260,6 +262,21 @@ class InvariantLearner:
             assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
             assert all(self.prop(positive_example) for positive_example in self.positive_examples)
             assert all(not self.prop(negative_example) for negative_example in self.negative_examples)
+
+        self.positive_examples_for_learning = \
+            self.sort_inputs(
+                self.positive_examples,
+                more_paths_weight=1.7,
+                smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
+
+        logger.info(
+            "Keeping %d positive examples for candidate generation.",
+            len(self.positive_examples_for_learning)
+        )
+
+        logger.debug(
+            "Examples for learning:\n%s",
+            "\n".join(map(str, self.positive_examples_for_learning)))
 
         candidates = self.generate_candidates(self.patterns, self.positive_examples_for_learning)
         logger.info("Found %d invariant candidates.", len(candidates))
@@ -338,13 +355,16 @@ class InvariantLearner:
         #     len(negative_examples) - ne_before
         # )
 
+        if not self.negative_examples:
+            return {inv: 1.0 for inv in invariants}
+
         logger.info("Evaluating precision.")
         # logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
 
         precision_truth_table = TruthTable([
             TruthTableRow(inv, self.negative_examples)
             for inv in invariants
-        ]).evaluate(self.grammar, rows_parallel=False)
+        ]).evaluate(self.grammar, rows_parallel=True)
 
         logger.info("Calculating precision of Boolean combinations.")
 
@@ -385,7 +405,7 @@ class InvariantLearner:
             self,
             patterns: Iterable[language.Formula | str],
             inputs: Iterable[language.DerivationTree]) -> Set[language.Formula]:
-        input_reachability_relation = self._create_input_reachability_relation(inputs)
+        input_reachability_relation = create_input_reachability_relation(inputs)
 
         logger.debug("Computed input reachability relation of size %d", len(input_reachability_relation))
 
@@ -394,6 +414,7 @@ class InvariantLearner:
             VariablesEqualFilter(),
             NonterminalStringInCountPredicatesFilter(self.graph, input_reachability_relation),
             StringToIntFilter(),
+            StringEqualityFilter(),
         ]
 
         filters = [filter for filter in filters if filter.name in self.filters]
@@ -480,24 +501,6 @@ class InvariantLearner:
 
         return formulas
 
-    def _create_input_reachability_relation(self, inputs: Iterable[language.DerivationTree]) -> Set[Tuple[str, str]]:
-        nonterminal_paths: Set[Tuple[str, ...]] = {
-            tuple([inp.get_subtree(path[:idx]).value
-                   for idx in range(len(path))])
-            for inp in inputs
-            for path, _ in inp.leaves()
-        }
-
-        input_reachability_relation: Set[Tuple[str, str]] = transitive_closure({
-            pair
-            for path in nonterminal_paths
-            for pair in [(path[i], path[k]) for i in range(len(path)) for k in range(i + 1, len(path))]
-        })
-
-        logger.debug("Computed input reachability relation of size %d", len(input_reachability_relation))
-
-        return input_reachability_relation
-
     def _generate_more_inputs(self):
         logger.info(
             "Starting with %d positive, and %d negative samples.",
@@ -569,27 +572,15 @@ class InvariantLearner:
                 smaller_inputs_weight=1.0
             )[:self.target_number_negative_samples]
 
-        self.positive_examples_for_learning = \
-            self.sort_inputs(
-                self.positive_examples,
-                more_paths_weight=1.7,
-                smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
-
         logger.info(
-            "Reduced positive / negative samples to subsets of %d / %d samples based on k-path coverage, "
-            "keeping %d positive examples for candidate generation.",
+            "Reduced positive / negative samples to subsets of %d / %d samples based on k-path coverage.",
             len(self.positive_examples),
             len(self.negative_examples),
-            len(self.positive_examples_for_learning),
         )
 
         logger.debug(
             "Positive examples:\n%s",
             "\n".join(map(str, self.positive_examples)))
-
-        logger.debug(
-            "Examples for learning:\n%s",
-            "\n".join(map(str, self.positive_examples_for_learning)))
 
     def _generate_sample_inputs(
             self,
@@ -938,13 +929,6 @@ class InvariantLearner:
                for placeholder in get_placeholders(inst_pattern)):
             return inst_patterns
 
-        # TODO: Consider precise context for strings:
-        #         forall <array_table> container in start:
-        #           exists <unquoted_key> elem in container:
-        #             (= elem "name")
-        #       is not possible since no unquoted_key with "name" occurs
-        #       in an <array_table> key!
-
         # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
         #       "1234", don't include the <digits> "34". This might lead
         #       to imprecision, but otherwise the search room tends to explode.
@@ -1056,14 +1040,14 @@ class PatternInstantiationFilter(ABC):
 class StructuralPredicatesFilter(PatternInstantiationFilter):
     def __init__(self):
         super().__init__("Structural Predicates Filter")
+        logger.warning(f"The {self.name} does only work properly in the presence of conjunctive "
+                       f"cores in quantified formulas. If there is, e.g., a disjunction, it will "
+                       f"be overly restrictive.")
 
     def order(self) -> int:
         return 0
 
     def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
-        # TODO: This does not work properly when we have non-conjunctive cores! E.g., in a disjunction
-        #       or inside a negation, this filter is too restrictive.
-
         # We approximate satisfaction of structural predicate formulas by searching
         # inputs for subtrees with the right nonterminal types according to the argument
         # types of the structural formulas.
@@ -1084,7 +1068,7 @@ class StructuralPredicatesFilter(PatternInstantiationFilter):
                     arg_insts[arg] = [path for path, subtree in inp_trees.items() if subtree.value == arg.n_type]
 
                 indices: Tuple[int, ...]
-                for indices in list(itertools.product(*[list(range(len(l))) for l in arg_insts.values()])):
+                for indices in itertools.product(*[list(range(len(l))) for l in arg_insts.values()]):
                     curr_insts: Dict[language.Variable, Path] = {}
                     for var_idx, inst_idx in enumerate(indices):
                         var = list(arg_insts.keys())[var_idx]
@@ -1126,7 +1110,7 @@ class VariablesEqualFilter(PatternInstantiationFilter):
                 lambda f: (isinstance(f, language.SMTFormula) and
                            z3.is_eq(f.formula) and
                            len(f.free_variables()) == 2 and
-                           all(isinstance(var, NonterminalPlaceholderVariable) for var in f.free_variables()) and
+                           all(not isinstance(var, PlaceholderVariable) for var in f.free_variables()) and
                            all(is_z3_var(child) for child in f.formula.children()))
             ).collect(formula))
 
@@ -1137,9 +1121,7 @@ class VariablesEqualFilter(PatternInstantiationFilter):
             success = True
 
             for smt_equality_formula in smt_equality_formulas:
-                free_vars: List[NonterminalPlaceholderVariable] = cast(
-                    List[NonterminalPlaceholderVariable],
-                    list(smt_equality_formula.free_variables()))
+                free_vars: List[language.Variable] = list(smt_equality_formula.free_variables())
 
                 if free_vars[0].n_type != free_vars[1].n_type:
                     # NOTE: In all existing case studies, we are only stipulating equality
@@ -1150,14 +1132,103 @@ class VariablesEqualFilter(PatternInstantiationFilter):
                     break
 
                 trees = [t for t in inp_trees.values() if t.value == free_vars[0].n_type]
+                if len(trees) < 2:
+                    success = False
+                    break
 
                 if not any(
                         t1.value == free_vars[0].n_type and
                         t2.value == free_vars[1].n_type
-                        for (p1, t1), (p2, t2)
-                        in itertools.product(trees, trees)
-                        if str(t1) == str(t2) and p1 != p2):
+                        for t1, t2 in itertools.product(trees, trees)
+                        if str(t1) == str(t2) and t1.id != t2.id):
                     success = False
+                    break
+
+            if success:
+                return True
+
+        return False
+
+
+class StringEqualityFilter(PatternInstantiationFilter):
+    def __init__(self):
+        super().__init__("String Equality Filter")
+
+    def order(self) -> int:
+        return 2
+
+    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
+        # Intuition: Consider precise context for strings. E.g., in the ISLearn config example,
+        #
+        # ```
+        # forall <array_table> container in start:
+        #   exists <unquoted_key> elem in container:
+        #     (= elem "name")
+        # ```
+        #
+        # is not possible since no unquoted_key with "name" occurs in an <array_table> key.
+
+        smt_equality_formulas: List[language.SMTFormula] = cast(
+            List[language.SMTFormula],
+            language.FilterVisitor(
+                lambda f: (isinstance(f, language.SMTFormula) and
+                           z3.is_eq(f.formula) and
+                           len(f.free_variables()) == 1 and
+                           any(is_z3_var(child) for child in f.formula.children()) and
+                           any(z3.is_string_value(child) for child in f.formula.children()))
+            ).collect(formula))
+
+        if not smt_equality_formulas:
+            return True
+
+        in_visitor = InVisitor()
+        formula.accept(in_visitor)
+        variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
+        assert all(chain[-1] == extract_top_level_constant(formula) for chain in variable_chains)
+
+        for inp_trees in inputs:
+            success = True
+
+            for smt_equality_formula in smt_equality_formulas:
+                variable = next(iter(smt_equality_formula.free_variables()))
+                value = next(child.as_string()
+                             for child in smt_equality_formula.formula.children()
+                             if z3.is_string_value(child))
+
+                matching_chains = [chain for chain in variable_chains if chain[0] == variable]
+                assert len(matching_chains) == 1
+                matching_chain = list(reversed([var.n_type for var in matching_chains[0]]))
+
+                # Check if there is an element of value `value` in inp_trees in a context matching `matching_chain`.
+
+                for path, subtree in inp_trees.items():
+                    if not subtree.value == variable.n_type:
+                        continue
+
+                    if str(subtree) != value:
+                        continue
+
+                    nonterminal_sequence = [inp_trees[path[:idx]].value for idx in range(len(path) + 1)]
+                    matching_chain_postfix = list(matching_chain)
+                    if len(nonterminal_sequence) < len(matching_chain_postfix):
+                        continue
+
+                    while nonterminal_sequence and matching_chain_postfix:
+                        if nonterminal_sequence[0] == matching_chain_postfix[0]:
+                            nonterminal_sequence.pop(0)
+                            matching_chain_postfix.pop(0)
+                            continue
+
+                        nonterminal_sequence.pop(0)
+
+                    if matching_chain_postfix:
+                        success = False
+                        continue
+                    else:
+                        success = True
+                        break
+
+                if not success:
                     break
 
             if success:
@@ -1369,6 +1440,25 @@ class PatternRepository:
                 result += "\n\n"
 
         return result.strip()
+
+
+def create_input_reachability_relation(inputs: Iterable[language.DerivationTree]) -> Set[Tuple[str, str]]:
+    nonterminal_paths: Set[Tuple[str, ...]] = {
+        tuple([inp.get_subtree(path[:idx]).value
+               for idx in range(len(path))])
+        for inp in inputs
+        for path, _ in inp.leaves()
+    }
+
+    input_reachability_relation: Set[Tuple[str, str]] = transitive_closure({
+        pair
+        for path in nonterminal_paths
+        for pair in [(path[i], path[k]) for i in range(len(path)) for k in range(i + 1, len(path))]
+    })
+
+    logger.debug("Computed input reachability relation of size %d", len(input_reachability_relation))
+
+    return input_reachability_relation
 
 
 def patterns_from_file(file_name: str = STANDARD_PATTERNS_REPO) -> PatternRepository:

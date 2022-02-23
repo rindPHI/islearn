@@ -22,7 +22,8 @@ from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 
 from grammars import toml_grammar
-from islearn.learner import patterns_from_file, InvariantLearner, STANDARD_PATTERNS_REPO
+from islearn.learner import patterns_from_file, InvariantLearner, STANDARD_PATTERNS_REPO, StringEqualityFilter, \
+    create_input_reachability_relation
 
 
 class TestLearner(unittest.TestCase):
@@ -422,21 +423,20 @@ forall <arith_expr> container_0 in start:
         tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(islearn_repo_content))[0])
 
         ##############
-        repo = patterns_from_file()
-        candidates = InvariantLearner(
-            toml_grammar,
-            None,
-            positive_examples=[tree]
-        ).generate_candidates(
-            # repo["Existence Strings Relative Order"],
-            repo["String Existence"],
-            [tree]
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     toml_grammar,
+        #     None,
+        #     positive_examples=[tree]
+        # ).generate_candidates(
+        #     repo["String Existence"],
+        #     [tree]
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##############
 
         result = InvariantLearner(
@@ -456,7 +456,45 @@ forall <arith_expr> container_0 in start:
             lambda f: ISLaUnparser(f).unparse(),
             [r for r, p in result.items() if p > .0]))
 
+        correct_property_1 = """
+forall <document> container in start:
+  exists <key> elem in container:
+    (= elem "name")"""
+
+        correct_property_2 = """
+forall <document> container in start:
+  exists <key> elem in container:
+    (= elem "constraint")"""
+
         self.assertIn(correct_property_1.strip(), nonzero_precision_results)
+        self.assertIn(correct_property_2.strip(), nonzero_precision_results)
+
+    def test_string_equality_filter(self):
+        repo = patterns_from_file()
+        # Only retain one constraint per group; too slow otherwise
+        repo.groups = {
+            g: dict([cast(Tuple[str, language.Formula], list(constraints.items())[0])])
+            for g, constraints in repo.groups.items()}
+
+        repo.groups = {"Def-Use": repo.groups["Def-Use"]}  # TODO: Remove
+
+        islearn_repo_content = str(repo)
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(islearn_repo_content))[0])
+        subtrees = dict(tree.paths())
+
+        wrong_formula = language.parse_isla("""
+forall <array_table> container in start:
+  exists <unquoted_key> elem in container:
+    (= elem "name")""", toml_grammar)
+
+        correct_formula = language.parse_isla("""
+forall <document> container in start:
+  exists <key> elem in container:
+    (= elem "constraint")""", toml_grammar)
+
+        str_eq_filter = StringEqualityFilter()
+        self.assertFalse(str_eq_filter.predicate(wrong_formula, [subtrees]))
+        self.assertTrue(str_eq_filter.predicate(correct_formula, [subtrees]))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

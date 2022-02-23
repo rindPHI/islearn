@@ -79,6 +79,7 @@ forall <?NONTERMINAL> container in start:
 
 [[Existential]]
 
+# NOTE: This pattern is quite expensive to instantiate.
 name = "Existence Strings Relative Order"
 constraint = '''
 forall <?NONTERMINAL> container in start:
