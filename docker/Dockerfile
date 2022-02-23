@@ -6,7 +6,7 @@ USER root
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
 RUN apk update
 RUN apk upgrade
-RUN apk add python3-dev git swi-prolog py3-scipy gcc g++ libgcc libquadmath gfortran libgfortran musl musl-dev make cmake libffi-dev lapack lapack-dev pkgconf zlib zlib-dev jpeg jpeg-dev zeromq zeromq-dev bash yaml yaml-dev
+RUN apk add python3-dev git swi-prolog py3-scipy gcc g++ libgcc libquadmath gfortran libgfortran musl musl-dev make cmake libffi-dev lapack lapack-dev pkgconf zlib zlib-dev jpeg jpeg-dev zeromq zeromq-dev bash yaml yaml-dev clang
 
 RUN adduser -D islearn
 USER islearn

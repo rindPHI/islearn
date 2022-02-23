@@ -274,6 +274,7 @@ exists int num:
         self.assertEqual(2, len(perfect_precision_formulas))
         self.assertIn(correct_property.strip(), [ISLaUnparser(f).unparse() for f in perfect_precision_formulas])
 
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_string_existence(self):
         correct_property = """
 forall <json> container in start:
