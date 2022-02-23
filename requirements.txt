@@ -42,8 +42,8 @@ fonttools==4.28.3
 fuzzingbook==1.0.1
 gitdb==4.0.9
 gprof2dot==2021.2.21
-grammar2regex @ git+https://github.com/rindPHI/grammar2regex
-grammargraph @ git+https://github.com/rindPHI/GrammarGraph
+grammar2regex @ git+https://github.com/rindPHI/grammar2regex#egg=grammar2regex
+grammargraph @ git+https://github.com/rindPHI/GrammarGraph#egg=grammargraph
 graphviz==0.17
 h11==0.12.0
 idna==3.3
@@ -54,7 +54,7 @@ ipykernel==6.4.1
 ipython-genutils==0.2.0
 ipython==7.27.0
 ipywidgets==7.6.5
-isla @ git+https://github.com/rindPHI/isla
+isla @ git+https://github.com/rindPHI/isla#egg=isla
 jedi==0.18.0
 joblib==1.1.0
 jsonschema==3.2.0
@@ -97,7 +97,7 @@ pox==0.3.0
 ppft==1.6.6.4
 prometheus-client==0.11.0
 prompt-toolkit==3.0.20
-proxyorderedset @ git+https://github.com/rindPHI/proxyorderedset
+proxyorderedset @ git+https://github.com/rindPHI/proxyorderedset#egg=proxyorderedset
 ptyprocess==0.7.0
 py==1.11.0
 pyOpenSSL==21.0.0
