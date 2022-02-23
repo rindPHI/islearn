@@ -929,46 +929,48 @@ class InvariantLearner:
                for placeholder in get_placeholders(inst_pattern)):
             return inst_patterns
 
-        # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
-        #       "1234", don't include the <digits> "34". This might lead
-        #       to imprecision, but otherwise the search room tends to explode.
-
-        # 10 is the length of a typical <DIGIT> nonterminal expansion set, which
-        # is why those nonterminal fragments would not be pruned.
-        trivial_fragments_exclusion_threshold = 10
-
         # NOTE: To reduce the search space, we also exclude fragments for nonterminals which
         #       have more than `trivial_fragments_exclusion_threshold` terminal children.
         #       This is rather arbitrary, but avoids finding all kinds of spurious invariants
         #       like "there is an 'e' in the text" which are likely to hold any many cases.
+        #       10 is the length of a typical <DIGIT> nonterminal expansion set, which
+        #       is why those nonterminal fragments would not be pruned.
+        trivial_fragments_exclusion_threshold = 10
 
-        # fragments: Dict[str, Set[str]] = {
-        #     nonterminal: {
-        #         str(tree)
-        #         for inp in inputs_subtrees
-        #         for path, tree in inp.items()
-        #         if (str(tree) and
-        #             tree.value == nonterminal and
-        #             not any(otree.value == tree.value
-        #                     for opath, otree in inp.items()
-        #                     if len(opath) < len(path) and
-        #                     opath == path[:len(opath)]))
-        #     }
-        #     for nonterminal in self.grammar
-        #     if not (len(self.grammar[nonterminal]) > trivial_fragments_exclusion_threshold and
-        #             all(len(expansion) == 1 and not is_nonterminal(expansion[0])
-        #                 for expansion in self.canonical_grammar[nonterminal]))
-        # }
+        @lru_cache(maxsize=100)
+        def reachable_characters(symbol: str) -> Optional[Set[str]]:
+            if not is_nonterminal(symbol):
+                return {symbol}
+
+            if any(len(expansion) > 1 for expansion in self.canonical_grammar[symbol]):
+                return None
+
+            expansion_elements = {
+                element for expansion in self.canonical_grammar[symbol]
+                for element in expansion
+            }
+
+            if all(len(element) == 1 and not is_nonterminal(element)
+                   for element in expansion_elements):
+                return expansion_elements
+
+            children_results = [
+                reachable_characters(element)
+                for element in expansion_elements
+            ]
+
+            if any(child_result is None for child_result in children_results):
+                return None
+
+            return set(functools.reduce(set.__or__, children_results))
+
+        many_trivial_terminal_parents: Set[str] = set([])
+        for nonterminal in self.grammar:
+            reachable = reachable_characters(nonterminal)
+            if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
+                many_trivial_terminal_parents.add(nonterminal)
 
         fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
-
-        many_trivial_terminal_parents = [
-            nonterminal for nonterminal in self.grammar
-            if (len(self.grammar[nonterminal]) > trivial_fragments_exclusion_threshold and
-                all(len(expansion) == 1 and not is_nonterminal(expansion[0])
-                    for expansion in self.canonical_grammar[nonterminal]))
-        ]
-
         for inp in inputs_subtrees:
             remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(
                 sorted(cast(List[Tuple[Path, language.DerivationTree]], list(inp.items())),
@@ -979,37 +981,32 @@ class InvariantLearner:
                 if not is_nonterminal(tree.value):
                     continue
 
-                if tree.value in many_trivial_terminal_parents:
+                single_child_ancestors: List[language.DerivationTree] = [tree]
+                while len(single_child_ancestors[-1].children) == 1:
+                    single_child_ancestors.append(single_child_ancestors[-1].children[0])
+
+                if any(child.value in many_trivial_terminal_parents for child in single_child_ancestors):
                     continue
 
                 tree_string = str(tree)
                 if not tree_string:
                     continue
 
+                # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
+                #       "1234", don't include the <digits> "34". This might lead
+                #       to imprecision, but otherwise the search room tends to explode.
                 if any(len(opath) < len(path) and opath == path[:len(opath)]
                        for opath in handled_paths[tree.value]):
                     continue
 
                 handled_paths[tree.value].add(path)
                 fragments[tree.value].add(tree_string)
+                fragments[tree.value].add(str(len(tree_string)))
 
-        # For strings representing floats, we also include the rounded Integers.
-        for fragments_set in fragments.values():
-            fragments_set |= (
-                    {str(int(float(fragment)))
-                     for fragment in fragments_set
-                     if is_float(fragment) and not is_int(fragment)} |
-                    {str(int(float(fragment)) + 1)
-                     for fragment in fragments_set
-                     if is_float(fragment) and not is_int(fragment)})
-
-        # NOTE: We also exclude fragment sets for nonterminals where the fragments consist
-        #       of more than trivial_fragments_exclusion_threshold, and only of, single
-        #       characters, for the same reason as explained above.
-        fragments = {
-            key: values for key, values in fragments.items()
-            if not (len(values) > trivial_fragments_exclusion_threshold and all(len(value) == 1 for value in values))
-        }
+                # For strings representing floats, we also include the rounded Integers.
+                if is_float(tree_string) and not is_int(tree_string):
+                    fragments[tree.value].add(str(int(float(tree_string))))
+                    fragments[tree.value].add(str(int(float(tree_string)) + 1))
 
         logger.debug(
             "Extracted %d language fragments from sample inputs",

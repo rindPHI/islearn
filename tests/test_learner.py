@@ -470,7 +470,7 @@ forall <document> container in start:
         tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(repo)))[0])
 
         pattern = parse_abstract_isla("""
-forall <name> elem in start:
+forall <key> elem in start:
   (<= (str.len elem) (str.to.int <?STRING>))""")
 
         result = InvariantLearner(
@@ -480,8 +480,13 @@ forall <name> elem in start:
             {pattern}, [dict(tree.paths())]
         )
 
-        print(len(result))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
+        expected = language.parse_isla("""
+forall <key> elem in start:
+  (<= (str.len elem) (str.to.int "10"))""", toml_grammar)
+
+        # print(len(result))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
+        self.assertIn(expected, result)
 
     def test_string_equality_filter(self):
         repo = patterns_from_file()
