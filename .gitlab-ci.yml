@@ -32,15 +32,17 @@ build:
 docker-build-main:
   image: docker:latest
   tags:
-    - vps
+    - docker
+    - local
   stage: build
   # before_script:
     # - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
   script:
     - docker info
-    - echo "$CI_REGISTRY_PASSWORD" 
-    - echo "$CI_REGISTRY_USER" 
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin
-    - docker build --pull -t "$CI_REGISTRY_IMAGE" .
-    - docker push "$CI_REGISTRY_IMAGE"
+    # - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin
+    - docker login projects.cispa.saarland:5005
+    # - docker build --pull -t "$CI_REGISTRY_IMAGE" .
+    - docker build -t projects.cispa.saarland:5005/c01dost/islearn .
+    # - docker push "$CI_REGISTRY_IMAGE"
+    - docker push projects.cispa.saarland:5005/c01dost/islearn
   when: manual
