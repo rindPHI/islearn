@@ -295,7 +295,7 @@ class InvariantLearner:
             for inv in candidates
         ]).evaluate(
             self.grammar,
-            # rows_parallel=True,
+            rows_parallel=True,
             lazy=self.max_disjunction_size < 2,
             result_threshold=self.min_recall)
 
@@ -356,7 +356,7 @@ class InvariantLearner:
             for inv in invariants
         ]).evaluate(
             self.grammar,
-            # rows_parallel=True,
+            rows_parallel=True,
         )
 
         logger.info("Calculating precision of Boolean combinations.")
@@ -1255,14 +1255,18 @@ class StringEqualityFilter(PatternInstantiationFilter):
         #
         # is not possible since no unquoted_key with "name" occurs in an <array_table> key.
 
+        def is_equality_formula(f: z3.BoolRef) -> bool:
+            return (z3.is_eq(f) and
+                    any(is_z3_var(child) for child in f.children()) and
+                    any(z3.is_string_value(child) for child in f.children()))
+
         smt_equality_formulas: List[language.SMTFormula] = cast(
             List[language.SMTFormula],
             language.FilterVisitor(
                 lambda f: (isinstance(f, language.SMTFormula) and
-                           z3.is_eq(f.formula) and
                            len(f.free_variables()) == 1 and
-                           any(is_z3_var(child) for child in f.formula.children()) and
-                           any(z3.is_string_value(child) for child in f.formula.children()))
+                           (is_equality_formula(f.formula) or
+                           (z3.is_not(f.formula) and is_equality_formula(f.formula.children()[0]))))
             ).collect(formula))
 
         if not smt_equality_formulas:
@@ -1278,8 +1282,11 @@ class StringEqualityFilter(PatternInstantiationFilter):
 
             for smt_equality_formula in smt_equality_formulas:
                 variable = next(iter(smt_equality_formula.free_variables()))
+                z3_formula = (smt_equality_formula.formula.children()[0]
+                              if z3.is_not(smt_equality_formula.formula)
+                              else smt_equality_formula.formula)
                 value = next(child.as_string()
-                             for child in smt_equality_formula.formula.children()
+                             for child in z3_formula.children()
                              if z3.is_string_value(child))
 
                 matching_chains = [chain for chain in variable_chains if chain[0] == variable]
@@ -1322,6 +1329,13 @@ class StringEqualityFilter(PatternInstantiationFilter):
                 return True
 
         return False
+
+# TODO: Add str.in_re filter, to rule out instantiations like
+#       ```
+#       forall <YEAR> container="{<DIGIT> key}<DIGIT><DIGIT>{<DIGIT> value}" in start:
+#         ((not (= key "8")) or
+#         (str.in_re value (re.++ (re.++ (str.to_re """") (re.all)) (str.to_re """"))))
+#       ```
 
 
 class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
@@ -1448,15 +1462,22 @@ class InVisitor(language.FormulaVisitor):
 
     def handle(self, formula: language.QuantifiedFormula):
         self.result.add((formula.bound_variable, formula.in_variable))
-        if (formula.bind_expression and
-                any(isinstance(elem, MexprPlaceholderVariable)
-                    for elem in formula.bind_expression.bound_elements)):
-            phs = [elem for elem in formula.bind_expression.bound_elements
-                   if isinstance(elem, MexprPlaceholderVariable)]
-            assert len(phs) == 1
-            ph = cast(MexprPlaceholderVariable, phs[0])
-            for nonterminal_placeholder in ph.variables:
-                self.result.add((nonterminal_placeholder, formula.bound_variable))
+        if formula.bind_expression:
+            if any(isinstance(elem, MexprPlaceholderVariable)
+                    for elem in formula.bind_expression.bound_elements):
+                phs = [elem for elem in formula.bind_expression.bound_elements
+                       if isinstance(elem, MexprPlaceholderVariable)]
+                assert len(phs) == 1
+                ph = cast(MexprPlaceholderVariable, phs[0])
+                for nonterminal_placeholder in ph.variables:
+                    self.result.add((nonterminal_placeholder, formula.bound_variable))
+            else:
+                self.result.update({
+                    (var, formula.bound_variable)
+                    for var in formula.bind_expression.bound_elements
+                    if isinstance(var, language.BoundVariable)
+                    and not isinstance(var, language.DummyVariable)
+                })
 
 
 def get_placeholders(formula: language.Formula) -> Set[PlaceholderVariable]:

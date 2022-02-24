@@ -34,7 +34,7 @@ forall <?NONTERMINAL> attribute in start:
 
 [[Types]]
 
-name = "Value Type is Date (TOML Style)"
+name = "Value Type is Date (TOML)"
 constraint = '''
 forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
   ((= key <?STRING>) implies
@@ -43,6 +43,24 @@ forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
                            ((_ re.loop 2 2) (re.range "0" "9"))
                            (str.to_re "-")
                            ((_ re.loop 2 2) (re.range "0" "9")))))
+'''
+
+[[Types]]
+
+name = "Value Type is Number (TOML)"
+constraint = '''
+forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
+  ((= key <?STRING>) implies
+   (str.in_re value (re.+ (re.range "0" "9"))))
+'''
+
+[[Types]]
+
+name = "Value Type is String (TOML)"
+constraint = '''
+forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
+  ((= key <?STRING>) implies
+   (str.in_re value (re.++ (str.to_re """") re.all (str.to_re """"))))
 '''
 
 [[Universal]]

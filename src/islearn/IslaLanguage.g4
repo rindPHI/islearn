@@ -32,7 +32,7 @@ sexpr:
   | STRING            # SexprStr
   | '<?NONTERMINAL>'  # SexprNonterminalStringPh
   | '<?STRING>'       # SexprStringPh
-  | ('re.++' | 'str.++' | '=' | DIV | MUL | PLUS | MINUS | GEQ | LEQ | GT | LT)
+  | ('re.*' | 're.++' | 're.+' | 'str.++' | '=' | DIV | MUL | PLUS | MINUS | GEQ | LEQ | GT | LT)
                       # SexprOp
   | '(' op=sexpr sexpr + ')' # SepxrApp
   ;

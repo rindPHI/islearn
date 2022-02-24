@@ -550,11 +550,12 @@ forall <key> elem in start:
         content = '''
 name = "Dominic Steinhoefel"
 birthdate = 1988-10-09
+number = 17
 preferred_color = "blue"'''
 
         tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(content))[0])
 
-        expected_constraint = '''
+        expected_constraint_1 = '''
 forall <key_value> container="{<key> key} = {<value> value}" in start:
   ((not (= key "birthdate")) or
   (str.in_re 
@@ -569,6 +570,16 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         (str.to_re "-"))
       ((_ re.loop 2 2) (re.range "0" "9")))))'''
 
+        expected_constraint_2 = '''
+forall <key_value> container="{<key> key} = {<value> value}" in start:
+  ((not (= key "name")) or
+  (str.in_re value (re.++ (re.++ (str.to_re """") (re.all)) (str.to_re """"))))'''
+
+        expected_constraint_3 = '''
+forall <key_value> container="{<key> key} = {<value> value}" in start:
+  ((not (= key "number")) or
+  (str.in_re value (re.+ (re.range "0" "9"))))'''
+
         ##############
         # repo = patterns_from_file()
         # candidates = InvariantLearner(
@@ -576,7 +587,7 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         #     None,
         #     mexpr_expansion_limit=2
         # ).generate_candidates(
-        #     repo["Value Type is Date (TOML Style)"],
+        #     repo["Value Type is String (TOML)"],  # repo["Value Type is Date (TOML)"],
         #     [tree]
         # )
         #
@@ -584,7 +595,7 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
         #
         # self.assertIn(
-        #     strip_ws(expected_constraint),
+        #     strip_ws(expected_constraint_1),
         #     list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
         # )
         #
@@ -594,7 +605,11 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         result = InvariantLearner(
             toml_grammar,
             prop=None,
-            activated_patterns={"Value Type is Date (TOML Style)"},
+            activated_patterns={
+                "Value Type is Date (TOML)",
+                "Value Type is Number (TOML)",
+                "Value Type is String (TOML)",
+            },
             positive_examples=[tree]
         ).learn_invariants()
 
@@ -608,7 +623,9 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
             lambda f: ISLaUnparser(f).unparse(),
             [r for r, p in result.items() if p > .0])))
 
-        self.assertIn(strip_ws(expected_constraint), nonzero_precision_results)
+        self.assertIn(strip_ws(expected_constraint_1), nonzero_precision_results)
+        self.assertIn(strip_ws(expected_constraint_2), nonzero_precision_results)
+        self.assertIn(strip_ws(expected_constraint_3), nonzero_precision_results)
 
     def test_string_equality_filter(self):
         repo = patterns_from_file()
