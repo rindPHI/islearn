@@ -9,15 +9,18 @@ from typing import cast, Tuple
 import pytest
 from fuzzingbook.Grammars import JSON_GRAMMAR, srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
+from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
+from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 
 from grammars import toml_grammar
-from islearn.language import parse_abstract_isla
-from islearn.learner import patterns_from_file, InvariantLearner, StringEqualityFilter
+from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
+from islearn.learner import patterns_from_file, InvariantLearner, StringEqualityFilter, \
+    create_input_reachability_relation, InVisitor
 
 
 class TestLearner(unittest.TestCase):
@@ -503,6 +506,109 @@ forall <key> elem in start:
         # print(len(result))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
         self.assertIn(expected, result)
+
+    def test_instantiate_nonterminal_placeholders_toml(self):
+        graph = gg.GrammarGraph.from_grammar(toml_grammar)
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse("b = 1988-10-09"))[0])
+        learner = InvariantLearner(toml_grammar, None, )
+        pattern = list(patterns_from_file()["Value Type is Date (TOML Style)"])[0]
+
+        variable_instantiations = learner._instantiations_for_placeholder_variables(
+            pattern,
+            create_input_reachability_relation([tree])
+        )
+
+        for variable_instantiation in variable_instantiations:
+            container = NonterminalPlaceholderVariable("container")
+            key = NonterminalPlaceholderVariable("key")
+            value = NonterminalPlaceholderVariable("value")
+            container_ntype = variable_instantiation[container].n_type
+            key_ntype = variable_instantiation[key].n_type
+            value_ntype = variable_instantiation[value].n_type
+
+            self.assertTrue(graph.reachable(
+                container_ntype,
+                key_ntype),
+                f"Key nonterminal {key_ntype} not reachable from container nonterminal {container_ntype}")
+            self.assertTrue(graph.reachable(
+                container_ntype,
+                value_ntype),
+                f"Value nonterminal {value_ntype} not reachable from container nonterminal {container_ntype}")
+
+        formula_instantiations = learner._instantiate_nonterminal_placeholders(
+            pattern, set([]), variable_instantiations)
+
+        for inst in formula_instantiations:
+            v = InVisitor()
+            inst.accept(v)
+            wrong_pairs = [(v1, v2) for v1, v2 in v.result
+                           if v1.n_type != v2.n_type and
+                           not graph.reachable(v2.n_type, v1.n_type)]
+            self.assertFalse(wrong_pairs)
+
+    def test_toml_value_types(self):
+        content = '''
+name = "Dominic Steinhoefel"
+birthdate = 1988-10-09
+preferred_color = "blue"'''
+
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(content))[0])
+
+        expected_constraint = '''
+forall <key_value> container="{<key> key} = {<value> value}" in start:
+  ((not (= key "birthdate")) or
+  (str.in_re 
+    value 
+    (re.++ 
+      (re.++ 
+        (re.++ 
+          (re.++ 
+            ((_ re.loop 4 4) (re.range "0" "9"))
+            (str.to_re "-"))
+          ((_ re.loop 2 2) (re.range "0" "9")))
+        (str.to_re "-"))
+      ((_ re.loop 2 2) (re.range "0" "9")))))'''
+
+        ##############
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     toml_grammar,
+        #     None,
+        #     mexpr_expansion_limit=2
+        # ).generate_candidates(
+        #     repo["Value Type is Date (TOML Style)"],
+        #     [tree]
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # self.assertIn(
+        #     strip_ws(expected_constraint),
+        #     list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        # )
+        #
+        # return
+        ##############
+
+        result = InvariantLearner(
+            toml_grammar,
+            prop=None,
+            activated_patterns={"Value Type is Date (TOML Style)"},
+            positive_examples=[tree]
+        ).learn_invariants()
+
+        print(len(result))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print("\n".join(map(
+            lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
+            {f: p for f, p in result.items() if p > .0}.items())))
+
+        nonzero_precision_results = list(map(strip_ws, map(
+            lambda f: ISLaUnparser(f).unparse(),
+            [r for r, p in result.items() if p > .0])))
+
+        self.assertIn(strip_ws(expected_constraint), nonzero_precision_results)
 
     def test_string_equality_filter(self):
         repo = patterns_from_file()

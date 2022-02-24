@@ -20,7 +20,7 @@ toml_grammar = {
     "<quoted_key>": ["<BASIC_STRING>", "<LITERAL_STRING>"],
     "<dotted_key>": ["<simple_key><dot_simple_key>"],
     "<dot_simple_key>": [".<simple_key><dot_simple_key>", ".<simple_key>"],
-    "<value>": ["<string>", "<integer>", "<floating_point>", "<bool>", "<date_time>", "<array>", "<inline_table>"],
+    "<value>": ["<string>", "<date_time>", "<LOCAL_DATE>", "<integer>", "<floating_point>", "<bool>", "<array>", "<inline_table>"],
     "<string>": ["<ML_BASIC_STRING>", "<BASIC_STRING>", "<ML_LITERAL_STRING>", "<LITERAL_STRING>"],
     "<integer>": ["<DEC_INT>", "<HEX_INT>", "<OCT_INT>", "<BIN_INT>"],
     "<floating_point>": ["<FLOAT>", "<INF>", "<NAN>"],

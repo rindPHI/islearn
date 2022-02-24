@@ -32,6 +32,19 @@ forall <?NONTERMINAL> attribute in start:
            (= prefix_use prefix_def)))
 '''
 
+[[Types]]
+
+name = "Value Type is Date (TOML Style)"
+constraint = '''
+forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
+  ((= key <?STRING>) implies
+   (str.in_re value (re.++ ((_ re.loop 4 4) (re.range "0" "9"))
+                           (str.to_re "-")
+                           ((_ re.loop 2 2) (re.range "0" "9"))
+                           (str.to_re "-")
+                           ((_ re.loop 2 2) (re.range "0" "9")))))
+'''
+
 [[Universal]]
 
 name = "String Length Upper Bound"

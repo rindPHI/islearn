@@ -60,11 +60,10 @@ class TruthTableRow:
         10 negative results, 90% positive results is no longer possible."""
 
         if columns_parallel:
-            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+            with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
                 iterator = pool.imap(
                     lambda inp: evaluate(self.formula, inp, grammar).is_true(),
-                    self.inputs,
-                    chunksize=10)
+                    self.inputs)
 
                 self.eval_results = []
                 negative_results = 0
@@ -177,11 +176,10 @@ class TruthTable:
         assert not columns_parallel or not rows_parallel
 
         if rows_parallel:
-            with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
+            with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
                 self.rows = set(pool.map(
                     lambda row: row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold),
-                    self.rows,
-                    chunksize=10
+                    self.rows
                 ))
         else:
             for row in self.rows:
@@ -289,23 +287,15 @@ class InvariantLearner:
 
         # Only consider *real* invariants
 
-        # invariants = list(candidates)
-        # test_inputs = list(self.positive_examples)
-        # while invariants and test_inputs:
-        #     inp = test_inputs.pop(0)
-        #     with pmp.ProcessingPool(processes=2 * pmp.cpu_count()) as pool:
-        #         invariants = [inv for inv in pool.map(
-        #             lambda inv: (inv if evaluate(inv, inp, self.grammar).is_true() else None),
-        #             invariants,
-        #             chunksize=10
-        #         ) if inv is not None]
-
+        # NOTE: Disabled parallel evaluation for now. In certain cases, this renders
+        #       the filtering process *much* slower, or gives rise to stack overflows
+        #       (e.g., "test_learn_from_islearn_patterns_file" example).
         recall_truth_table = TruthTable([
             TruthTableRow(inv, self.positive_examples)
             for inv in candidates
         ]).evaluate(
             self.grammar,
-            rows_parallel=True,
+            # rows_parallel=True,
             lazy=self.max_disjunction_size < 2,
             result_threshold=self.min_recall)
 
@@ -364,7 +354,10 @@ class InvariantLearner:
         precision_truth_table = TruthTable([
             TruthTableRow(inv, self.negative_examples)
             for inv in invariants
-        ]).evaluate(self.grammar, rows_parallel=True)
+        ]).evaluate(
+            self.grammar,
+            # rows_parallel=True,
+        )
 
         logger.info("Calculating precision of Boolean combinations.")
 
@@ -485,26 +478,30 @@ class InvariantLearner:
             formulas: Set[language.Formula],
             filters: List['PatternInstantiationFilter'],
             order: int,
-            inputs: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
+            inputs: List[Dict[Path, language.DerivationTree]],
+            parallel: bool = False) -> Set[language.Formula]:
+        # TODO: Check when parallel evaluation makes sense. In some cases, like
+        #       "test_learn_from_islearn_patterns_file," the overhead of parallel
+        #       evaluation seems to bee too high, in other cases (which?), it seems to work.
         for pattern_filter in filters:
             if not pattern_filter.order() == order:
                 continue
 
-            # formulas = {
-            #     pattern_inst for pattern_inst in formulas
-            #     if pattern_filter.predicate(pattern_inst, inputs)
-            # }
+            if parallel:
+                formulas = list(formulas)
 
-            formulas = list(formulas)
+                with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+                    eval_results = list(pool.map(
+                        lambda pattern_inst: int(pattern_filter.predicate(pattern_inst, inputs)),
+                        formulas,
+                    ))
 
-            with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-                eval_results = list(pool.map(
-                    lambda pattern_inst: int(pattern_filter.predicate(pattern_inst, inputs)),
-                    formulas,
-                    chunksize=len(formulas) // pmp.cpu_count()
-                ))
-
-            formulas = set(itertools.compress(formulas, eval_results))
+                formulas = set(itertools.compress(formulas, eval_results))
+            else:
+                formulas = {
+                    pattern_inst for pattern_inst in formulas
+                    if pattern_filter.predicate(pattern_inst, inputs)
+                }
 
             logger.debug("%d instantiations remaining after filter '%s'",
                          len(formulas),
@@ -683,16 +680,35 @@ class InvariantLearner:
 
         return result
 
-    @staticmethod
     def _instantiate_nonterminal_placeholders(
+            self,
             pattern: language.Formula,
-            input_reachability_relation: Set[Tuple[str, str]]) -> Set[language.Formula]:
+            input_reachability_relation: Set[Tuple[str, str]],
+            _instantiations: Optional[List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]]] = None
+    ) -> Set[language.Formula]:
+        if _instantiations:
+            instantiations = _instantiations
+        else:
+            instantiations = self._instantiations_for_placeholder_variables(pattern, input_reachability_relation)
+
+        result: Set[language.Formula] = {
+            pattern.substitute_variables(instantiation)
+            for instantiation in instantiations
+        }
+
+        return result
+
+    def _instantiations_for_placeholder_variables(
+            self,
+            pattern: language.Formula,
+            input_reachability_relation: Set[Tuple[str, str]]
+    ) -> List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]]:
         in_visitor = InVisitor()
         pattern.accept(in_visitor)
         variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
         assert all(chain[-1] == extract_top_level_constant(pattern) for chain in variable_chains)
-
         instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
+
         for variable_chain in variable_chains:
             nonterminal_sequences: Set[Tuple[str, ...]] = set([])
 
@@ -717,18 +733,22 @@ class InvariantLearner:
             if not instantiations:
                 instantiations = new_instantiations
             else:
-                instantiations = [
-                    cast(Dict[NonterminalPlaceholderVariable, language.BoundVariable],
-                         functools.reduce(dict.__or__, t))
-                    for t in list(itertools.product(instantiations, new_instantiations))
-                ]
+                previous_instantiations = instantiations
+                instantiations = []
+                for previous_instantiation in previous_instantiations:
+                    for new_instantiation in new_instantiations:
+                        # NOTE: There might be clashes, since multiple chains are generated if there is
+                        #       more than one variable in a match expression. We have to first check if
+                        #       two instantiations happen to conform to each other.
+                        if any(new_instantiation[key_1].n_type != previous_instantiation[key_2].n_type
+                               for key_1 in new_instantiation
+                               for key_2 in previous_instantiation
+                               if key_1 == key_2):
+                            continue
 
-        result: Set[language.Formula] = {
-            pattern.substitute_variables(instantiation)
-            for instantiation in instantiations
-        }
+                        instantiations.append(previous_instantiation | new_instantiation)
 
-        return result
+        return instantiations
 
     def _instantiate_mexpr_placeholders(
             self,
@@ -758,7 +778,7 @@ class InvariantLearner:
                     AbstractBindExpression,
                     qfd_formula_w_mexpr_phs.bind_expression).bound_elements[0]
                 in_nonterminal = qfd_formula_w_mexpr_phs.bound_variable.n_type
-                nonterminal_types = tuple([var.n_type for var in mexpr_ph.variables])
+                nonterminal_types: Tuple[str, ...] = tuple([var.n_type for var in mexpr_ph.variables])
 
                 for mexpr_str in self._infer_mexpr(in_nonterminal, nonterminal_types):
                     def replace_with_var(elem: str) -> str | language.Variable:
@@ -792,7 +812,9 @@ class InvariantLearner:
     def _infer_mexpr(
             self,
             in_nonterminal: str,
-            nonterminal_types: Tuple[str]) -> Set[str]:
+            nonterminal_types: Tuple[str, ...]) -> Set[str]:
+        assert all(self.graph.reachable(in_nonterminal, target) for target in nonterminal_types)
+
         result: Set[str] = set([])
 
         candidate_trees: List[ParseTree] = [(in_nonterminal, None)]

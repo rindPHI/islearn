@@ -7,7 +7,7 @@ import antlr4
 import z3
 from antlr4 import InputStream
 from isla import language
-from isla.helpers import get_symbols
+from isla.helpers import get_symbols, smt_expr_to_str
 from isla.isla_predicates import STANDARD_STRUCTURAL_PREDICATES, STANDARD_SEMANTIC_PREDICATES
 from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, VariableManager, Variable, Formula, \
     parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter
@@ -245,7 +245,7 @@ class AbstractISLaUnparser(ISLaUnparser):
         super().__init__(formula, indent)
 
     def _unparse_smt_formula(self, formula: language.SMTFormula):
-        result = formula.formula.sexpr()
+        result = smt_expr_to_str(formula.formula)
 
         for variable in formula.free_variables():
             if not isinstance(variable, StringPlaceholderVariable):

@@ -1,9 +1,9 @@
+import logging
 import math
-from typing import List, Callable, Tuple, Generator, Optional, Dict
+from typing import List, Callable, Tuple, Generator, Optional
 
-from fuzzingbook.Parser import canonical
-from isla.helpers import is_nonterminal, dict_of_lists_to_list_of_dicts
-from isla.type_defs import ParseTree, Path, Grammar, CanonicalGrammar
+from isla.helpers import is_nonterminal
+from isla.type_defs import ParseTree, Path, CanonicalGrammar
 
 
 def get_subtree(tree: ParseTree, path: Path) -> ParseTree:
@@ -22,18 +22,18 @@ def replace_path(
         replacement_tree: ParseTree) -> ParseTree:
     """Returns tree where replacement_tree has been inserted at `path` instead of the original subtree"""
     stack: List[ParseTree] = [tree]
-    for idx in path:
-        stack.append(stack[-1][1][idx])
+    for path_elem in path:
+        stack.append(stack[-1][1][path_elem])
 
     stack[-1] = replacement_tree
 
-    for idx in reversed(path):
+    for path_elem in reversed(path):
         assert len(stack) > 1
         replacement = stack.pop()
         parent = stack.pop()
 
         node, children = parent
-        new_children = children[:idx] + [replacement] + children[idx + 1:]
+        new_children = children[:path_elem] + [replacement] + children[path_elem + 1:]
 
         stack.append((node, new_children))
 
@@ -138,38 +138,37 @@ def tree_leaves(tree: ParseTree) -> Generator[Tuple[Path, ParseTree], None, None
 def expand_tree(
         tree: ParseTree,
         canonical_grammar: CanonicalGrammar,
-        limit: Optional[int] = None) -> List[ParseTree]:
+        limit: Optional[int] = None,
+        expand_beyond_nonterminals: bool = False) -> List[ParseTree]:
     nonterminal_expansions = {
-        leaf_path: [
+        (leaf_path, leaf_node): [
             [(child, None if is_nonterminal(child) else [])
              for child in expansion]
             for expansion in canonical_grammar[leaf_node[0]]
+            if expand_beyond_nonterminals or any(is_nonterminal(child) for child in expansion)
         ]
         for leaf_path, leaf_node in open_leaves(tree)
     }
 
-    possible_expansions: List[Dict[Path, List[ParseTree]]] = \
-        dict_of_lists_to_list_of_dicts(nonterminal_expansions)
+    result: List[ParseTree] = [tree]
+    for (leaf_path, leaf_node), expansions in nonterminal_expansions.items():
+        previous_result = result
+        result = []
+        for t in previous_result:
+            for expansion in expansions:
+                result.append(replace_path(
+                    t,
+                    leaf_path,
+                    (leaf_node[0], expansion)))
 
-    assert len(possible_expansions) == math.prod(len(values) for values in nonterminal_expansions.values())
+                if limit and len(result) >= limit:
+                    break
+            if limit and len(result) >= limit:
+                break
+        if limit and len(result) >= limit:
+            break
 
-    if len(possible_expansions) == 1 and not possible_expansions[0]:
-        return []
+    assert ((limit and len(result) == limit) or
+            len(result) == math.prod(len(values) for values in nonterminal_expansions.values()))
 
-    if limit:
-        possible_expansions = possible_expansions[:limit]
-
-    result: List[ParseTree] = []
-    for possible_expansion in possible_expansions:
-        expanded_tree: ParseTree = tree
-        for path, new_children in possible_expansion.items():
-            leaf_node = get_subtree(expanded_tree, path)
-            expanded_tree = replace_path(
-                expanded_tree,
-                path,
-                (leaf_node[0], new_children))
-
-        result.append(expanded_tree)
-
-    assert not limit or len(result) <= limit
     return result

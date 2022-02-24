@@ -25,14 +25,16 @@ formula:
 varType : LT ID GT | '<?NONTERMINAL>';
 
 sexpr:
-    'true'                                                                          # SexprTrue
-  | 'false'                                                                         # SexprFalse
-  | INT                                                                             # SexprNum
-  | ID                                                                              # SexprId
-  | STRING                                                                          # SexprStr
-  | '<?NONTERMINAL>'                                                                # SexprNonterminalStringPh
-  | '<?STRING>'                                                                     # SexprStringPh
-  | '(' op=(ID | '=' | DIV | MUL | PLUS | MINUS | GEQ | LEQ | GT | LT)  sexpr + ')' # SepxrApp
+    'true'            # SexprTrue
+  | 'false'           # SexprFalse
+  | INT               # SexprNum
+  | ID                # SexprId
+  | STRING            # SexprStr
+  | '<?NONTERMINAL>'  # SexprNonterminalStringPh
+  | '<?STRING>'       # SexprStringPh
+  | ('re.++' | 'str.++' | '=' | DIV | MUL | PLUS | MINUS | GEQ | LEQ | GT | LT)
+                      # SexprOp
+  | '(' op=sexpr sexpr + ')' # SepxrApp
   ;
 
 predicateArg: ID | INT | STRING | '<?NONTERMINAL>' | '<?STRING>';
