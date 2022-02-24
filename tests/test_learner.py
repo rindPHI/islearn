@@ -511,7 +511,7 @@ forall <key> elem in start:
         graph = gg.GrammarGraph.from_grammar(toml_grammar)
         tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse("b = 1988-10-09"))[0])
         learner = InvariantLearner(toml_grammar, None, )
-        pattern = list(patterns_from_file()["Value Type is Date (TOML Style)"])[0]
+        pattern = list(patterns_from_file()["Value Type is Date (TOML)"])[0]
 
         variable_instantiations = learner._instantiations_for_placeholder_variables(
             pattern,
