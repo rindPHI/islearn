@@ -295,7 +295,7 @@ class InvariantLearner:
             for inv in candidates
         ]).evaluate(
             self.grammar,
-            rows_parallel=True,
+            # rows_parallel=True,
             lazy=self.max_disjunction_size < 2,
             result_threshold=self.min_recall)
 
@@ -356,7 +356,7 @@ class InvariantLearner:
             for inv in invariants
         ]).evaluate(
             self.grammar,
-            rows_parallel=True,
+            # rows_parallel=True,
         )
 
         logger.info("Calculating precision of Boolean combinations.")
