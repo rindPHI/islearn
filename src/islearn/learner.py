@@ -18,7 +18,7 @@ from isla import language, isla_predicates
 from isla.evaluator import evaluate
 from isla.existential_helpers import paths_between
 from isla.helpers import is_z3_var, z3_subst, dict_of_lists_to_list_of_dicts, RE_NONTERMINAL, weighted_geometric_mean, \
-    visit_z3_expr, is_nonterminal
+    visit_z3_expr, is_nonterminal, evaluate_z3_expression
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
@@ -209,6 +209,7 @@ class InvariantLearner:
                     "Nonterminal String in `count` Predicates Filter",
                     "String-to-Int Filter",
                     "String Equality Filter",
+                    "InRe Filter"
             ),
             mexpr_expansion_limit: int = 5,
             min_recall: float = .9,
@@ -408,6 +409,7 @@ class InvariantLearner:
             NonterminalStringInCountPredicatesFilter(self.graph, input_reachability_relation),
             StringToIntFilter(),
             StringEqualityFilter(),
+            InReFilter()
         ]
 
         filters = [filter for filter in filters if filter.name in self.filters]
@@ -1266,7 +1268,7 @@ class StringEqualityFilter(PatternInstantiationFilter):
                 lambda f: (isinstance(f, language.SMTFormula) and
                            len(f.free_variables()) == 1 and
                            (is_equality_formula(f.formula) or
-                           (z3.is_not(f.formula) and is_equality_formula(f.formula.children()[0]))))
+                            (z3.is_not(f.formula) and is_equality_formula(f.formula.children()[0]))))
             ).collect(formula))
 
         if not smt_equality_formulas:
@@ -1300,6 +1302,7 @@ class StringEqualityFilter(PatternInstantiationFilter):
                         continue
 
                     if str(subtree) != value:
+                        success = False
                         continue
 
                     nonterminal_sequence = [inp_trees[path[:idx]].value for idx in range(len(path) + 1)]
@@ -1330,12 +1333,98 @@ class StringEqualityFilter(PatternInstantiationFilter):
 
         return False
 
-# TODO: Add str.in_re filter, to rule out instantiations like
-#       ```
-#       forall <YEAR> container="{<DIGIT> key}<DIGIT><DIGIT>{<DIGIT> value}" in start:
-#         ((not (= key "8")) or
-#         (str.in_re value (re.++ (re.++ (str.to_re """") (re.all)) (str.to_re """"))))
-#       ```
+
+class InReFilter(PatternInstantiationFilter):
+    def __init__(self):
+        super().__init__("InRe Filter")
+
+    def order(self) -> int:
+        return 2
+
+    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
+        # Check if there is a matching string in the precise context, to rule out
+        # instantiations such as:
+        #
+        # ```
+        # forall <YEAR> container="{<DIGIT> key}<DIGIT><DIGIT>{<DIGIT> value}" in start:
+        #   ((not (= key "8")) or
+        #   (str.in_re value (re.++ (re.++ (str.to_re """") (re.all)) (str.to_re """"))))
+        # ```
+
+        def is_in_re_formula(f: z3.BoolRef) -> bool:
+            return (f.decl().kind() == z3.Z3_OP_SEQ_IN_RE and
+                    is_z3_var(f.children()[0]))
+
+        smt_in_re_formulas: List[language.SMTFormula] = cast(
+            List[language.SMTFormula],
+            language.FilterVisitor(
+                lambda f: (isinstance(f, language.SMTFormula) and
+                           len(f.free_variables()) == 1 and
+                           (is_in_re_formula(f.formula) or
+                            (z3.is_not(f.formula) and is_in_re_formula(f.formula.children()[0]))))
+            ).collect(formula))
+
+        if not smt_in_re_formulas:
+            return True
+
+        in_visitor = InVisitor()
+        formula.accept(in_visitor)
+        variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
+        assert all(chain[-1] == extract_top_level_constant(formula) for chain in variable_chains)
+
+        for inp_trees in inputs:
+            success = True
+
+            for smt_in_re_formula in smt_in_re_formulas:
+                variable = next(iter(smt_in_re_formula.free_variables()))
+                z3_formula = (smt_in_re_formula.formula.children()[0]
+                              if z3.is_not(smt_in_re_formula.formula)
+                              else smt_in_re_formula.formula)
+                regex = evaluate_z3_expression(z3_formula.children()[1])
+
+                matching_chains = [chain for chain in variable_chains if chain[0] == variable]
+                assert len(matching_chains) == 1
+                matching_chain = list(reversed([var.n_type for var in matching_chains[0]]))
+
+                # Check if there is an element of value `value` in inp_trees in a context matching `matching_chain`.
+
+                for path, subtree in inp_trees.items():
+                    if not subtree.value == variable.n_type:
+                        continue
+
+                    if not re.match(f"^{regex}$", str(subtree)):
+                        success = False
+                        continue
+
+                    nonterminal_sequence = [inp_trees[path[:idx]].value for idx in range(len(path) + 1)]
+                    matching_chain_postfix = list(matching_chain)
+                    if len(nonterminal_sequence) < len(matching_chain_postfix):
+                        continue
+
+                    while nonterminal_sequence and matching_chain_postfix:
+                        if nonterminal_sequence[0] == matching_chain_postfix[0]:
+                            nonterminal_sequence.pop(0)
+                            matching_chain_postfix.pop(0)
+                            continue
+
+                        nonterminal_sequence.pop(0)
+
+                    if matching_chain_postfix:
+                        success = False
+                        continue
+                    else:
+                        success = True
+                        break
+
+                if not success:
+                    break
+
+            if success:
+                return True
+
+        return False
+
+
 
 
 class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
@@ -1464,7 +1553,7 @@ class InVisitor(language.FormulaVisitor):
         self.result.add((formula.bound_variable, formula.in_variable))
         if formula.bind_expression:
             if any(isinstance(elem, MexprPlaceholderVariable)
-                    for elem in formula.bind_expression.bound_elements):
+                   for elem in formula.bind_expression.bound_elements):
                 phs = [elem for elem in formula.bind_expression.bound_elements
                        if isinstance(elem, MexprPlaceholderVariable)]
                 assert len(phs) == 1
@@ -1476,7 +1565,7 @@ class InVisitor(language.FormulaVisitor):
                     (var, formula.bound_variable)
                     for var in formula.bind_expression.bound_elements
                     if isinstance(var, language.BoundVariable)
-                    and not isinstance(var, language.DummyVariable)
+                       and not isinstance(var, language.DummyVariable)
                 })
 
 
