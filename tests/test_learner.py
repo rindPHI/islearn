@@ -584,7 +584,7 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         expected_constraint_3 = '''
 forall <key_value> container="{<key> key} = {<value> value}" in start:
   ((not (= key "number")) or
-  (str.in_re value (re.+ (re.range "0" "9"))))'''
+  (str.in_re value (re.++ (re.opt (str.to_re "-")) (re.+ (re.range "0" "9")))))'''
 
         ##############
         # repo = patterns_from_file()
@@ -613,7 +613,7 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
             prop=None,
             activated_patterns={
                 "Value Type is Date (TOML)",
-                "Value Type is Number (TOML)",
+                "Value Type is Integer (TOML)",
                 "Value Type is String (TOML)",
             },
             positive_examples=[tree]

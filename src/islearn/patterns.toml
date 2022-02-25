@@ -47,11 +47,11 @@ forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
 
 [[Types]]
 
-name = "Value Type is Number (TOML)"
+name = "Value Type is Integer (TOML)"
 constraint = '''
 forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
   ((= key <?STRING>) implies
-   (str.in_re value (re.+ (re.range "0" "9"))))
+   (str.in_re value (re.++ (re.opt (str.to_re "-")) (re.+ (re.range "0" "9")))))
 '''
 
 [[Types]]
