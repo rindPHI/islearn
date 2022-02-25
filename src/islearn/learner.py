@@ -347,6 +347,7 @@ class InvariantLearner:
         # )
 
         if not self.negative_examples:
+            invariants = sorted(list(invariants), key=lambda inv: len(inv))
             return {inv: 1.0 for inv in invariants}
 
         logger.info("Evaluating precision.")
@@ -392,7 +393,7 @@ class InvariantLearner:
         return dict(
             cast(List[Tuple[language.Formula, float]],
                  sorted(result.items(),
-                        key=lambda p: (p[1], -len(language.split_conjunction(p[0]))),
+                        key=lambda p: (p[1], -len(p[0])),
                         reverse=True)))
 
     def generate_candidates(

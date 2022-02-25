@@ -255,7 +255,3 @@ class BinaryDerivationTreeNode:
         self.orig_path = orig_path
         self.left = left
         self.right = right
-
-
-def convert_derivation_tree_to_binary(tree: language.DerivationTree) -> BinaryDerivationTreeNode:
-    pass

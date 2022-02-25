@@ -573,7 +573,13 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         expected_constraint_2 = '''
 forall <key_value> container="{<key> key} = {<value> value}" in start:
   ((not (= key "name")) or
-  (str.in_re value (re.++ (re.++ (str.to_re """") (re.all)) (str.to_re """"))))'''
+  (str.in_re 
+    value 
+    (re.++ 
+      (re.++ 
+        (str.to_re """")
+        (re.* (re.comp (re.union (str.to_re "\\n") (str.to_re """"))))) 
+      (str.to_re """"))))'''
 
         expected_constraint_3 = '''
 forall <key_value> container="{<key> key} = {<value> value}" in start:

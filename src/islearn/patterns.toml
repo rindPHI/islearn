@@ -60,7 +60,9 @@ name = "Value Type is String (TOML)"
 constraint = '''
 forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
   ((= key <?STRING>) implies
-   (str.in_re value (re.++ (str.to_re """") re.all (str.to_re """"))))
+   (str.in_re value (re.++ (str.to_re """")
+                           (re.* (re.comp (re.union (str.to_re "\n") (str.to_re """"))))
+                           (str.to_re """"))))
 '''
 
 [[Universal]]
