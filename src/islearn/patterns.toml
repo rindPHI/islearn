@@ -85,6 +85,16 @@ forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
            (re.+ (re.range "0" "9")))))))
 '''
 
+[[Types]]
+
+name = "Value Type is Integer (CSV)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  forall <?NONTERMINAL> elem in container:
+    (nth("<?NONTERMINAL>", elem, container) implies
+     (str.in_re value (re.++ (re.opt (str.to_re "-")) (re.+ (re.range "0" "9")))))
+'''
+
 [[Universal]]
 
 name = "String Length Upper Bound"

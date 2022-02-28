@@ -16,6 +16,7 @@ from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
+from isla_formalizations.csv import CSV_GRAMMAR
 
 from grammars import toml_grammar
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
@@ -621,6 +622,62 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         # )
         #
         # return
+        ##############
+
+        result = InvariantLearner(
+            toml_grammar,
+            prop=None,
+            activated_patterns={
+                "Value Type is Date (TOML)",
+                "Value Type is Integer (TOML)",
+                "Value Type is String (TOML)",
+                "Value Type is Float (TOML)",
+            },
+            positive_examples=[tree]
+        ).learn_invariants()
+
+        print(len(result))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print("\n".join(map(
+            lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
+            {f: p for f, p in result.items() if p > .0}.items())))
+
+        nonzero_precision_results = list(map(strip_ws, map(
+            lambda f: ISLaUnparser(f).unparse(),
+            [r for r, p in result.items() if p > .0])))
+
+        self.assertIn(strip_ws(expected_constraint_1), nonzero_precision_results)
+        self.assertIn(strip_ws(expected_constraint_2), nonzero_precision_results)
+        self.assertIn(strip_ws(expected_constraint_3), nonzero_precision_results)
+        self.assertIn(strip_ws(expected_constraint_4), nonzero_precision_results)
+
+    def test_csv_value_types(self):
+        content = '''a;b;c
+1;2;3
+'''
+
+        tree = language.DerivationTree.from_parse_tree(list(EarleyParser(CSV_GRAMMAR).parse(content))[0])
+
+        ##############
+        repo = patterns_from_file()
+        candidates = InvariantLearner(
+            toml_grammar,
+            None,
+            mexpr_expansion_limit=2
+        ).generate_candidates(
+            repo["Value Type is Integer (CSV)"],
+            [tree]
+        )
+
+        print(len(candidates))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        # self.assertIn(
+        #     strip_ws(expected_constraint_4),
+        #     list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        # )
+
+        return
         ##############
 
         result = InvariantLearner(
