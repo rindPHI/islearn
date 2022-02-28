@@ -90,9 +90,58 @@ forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
 name = "Value Type is Integer (CSV)"
 constraint = '''
 forall <?NONTERMINAL> container in start:
-  forall <?NONTERMINAL> elem in container:
-    (nth("<?NONTERMINAL>", elem, container) implies
-     (str.in_re value (re.++ (re.opt (str.to_re "-")) (re.+ (re.range "0" "9")))))
+  forall <?NONTERMINAL> row in container:
+    exists <?NONTERMINAL> column in row:
+      (nth(<?STRING>, column, row) and
+        (str.in_re column (re.++ (re.opt (str.to_re "-")) (re.+ (re.range "0" "9")))))
+'''
+
+[[Types]]
+
+name = "Value Type is String (CSV)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  forall <?NONTERMINAL> row in container:
+    exists <?NONTERMINAL> column in row:
+      (nth(<?STRING>, column, row) and
+        (str.in_re column (re.++ (str.to_re """")
+                          (re.* (re.comp (re.union (str.to_re "\n") (str.to_re """"))))
+                          (str.to_re """"))))
+'''
+
+[[Types]]
+
+name = "Value Type is Float (CSV)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  forall <?NONTERMINAL> row in container:
+    exists <?NONTERMINAL> column in row:
+      (nth(<?STRING>, column, row) and
+        (str.in_re column
+          (re.++
+            (re.opt (re.union (str.to_re "+") (str.to_re "-")))
+            (re.union
+              (re.++
+                (re.+ (re.range "0" "9"))
+                (re.++ (str.to_re ".") (re.* (re.range "0" "9"))))
+              (re.++
+                (str.to_re ".")
+                (re.+ (re.range "0" "9")))))))
+'''
+
+[[Types]]
+
+name = "Value Type is Date (CSV)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  forall <?NONTERMINAL> row in container:
+    exists <?NONTERMINAL> column in row:
+      (nth(<?STRING>, column, row) and
+        (str.in_re column (re.++ ((_ re.loop 4 4) (re.range "0" "9"))
+                          (str.to_re "-")
+                          ((_ re.loop 2 2) (re.range "0" "9"))
+                          (str.to_re "-")
+                          ((_ re.loop 2 2) (re.range "0" "9")))))
 '''
 
 [[Universal]]

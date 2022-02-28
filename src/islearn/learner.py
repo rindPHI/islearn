@@ -443,10 +443,20 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating match expression placeholders",
                          len(pattern_insts_without_mexpr_placeholders))
 
-            pattern_insts_without_mexpr_placeholders = self._apply_filters(
-                pattern_insts_without_mexpr_placeholders, filters, 0, inputs_subtrees)
+            # 3. Special string placeholders in predicates.
+            #    This comprises, e.g., `nth(<STRING>, elem, container`.
+            pattern_insts_without_special_string_placeholders = \
+                self.__instantiate_special_predicate_string_placeholders(
+                    pattern_insts_without_mexpr_placeholders, inputs_subtrees)
 
-            # 3. Nonterminal-String placeholders
+            logger.debug("Found %d instantiations of pattern after instantiating special predicate string placeholders",
+                         len(pattern_insts_without_special_string_placeholders))
+
+            # First round of filters
+            pattern_insts_without_mexpr_placeholders = self._apply_filters(
+                pattern_insts_without_special_string_placeholders, filters, 0, inputs_subtrees)
+
+            # 4. Nonterminal-String placeholders
             pattern_insts_without_nonterminal_string_placeholders = self._instantiate_nonterminal_string_placeholders(
                 pattern_insts_without_mexpr_placeholders)
 
@@ -456,7 +466,7 @@ class InvariantLearner:
             pattern_insts_without_nonterminal_string_placeholders = self._apply_filters(
                 pattern_insts_without_nonterminal_string_placeholders, filters, 1, inputs_subtrees)
 
-            # 4. String placeholders
+            # 5. String placeholders
             pattern_insts_without_string_placeholders = self._instantiate_string_placeholders(
                 pattern_insts_without_nonterminal_string_placeholders, inputs_subtrees)
 
@@ -933,6 +943,98 @@ class InvariantLearner:
 
         return result
 
+    def __instantiate_special_predicate_string_placeholders(
+            self,
+            inst_patterns: Set[language.Formula],
+            inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
+        result: Set[language.Formula] = set([])
+
+        for pattern in inst_patterns:
+            nth_predicates = language.FilterVisitor(
+                lambda f: (isinstance(f, language.StructuralPredicateFormula) and
+                           f.predicate == isla_predicates.NTH_PREDICATE and
+                           isinstance(f.args[0], StringPlaceholderVariable))
+            ).collect(pattern)
+
+            if not nth_predicates:
+                result.add(pattern)
+
+            # We expect that we don't count in "trivial" nonterminals, i.e., those that immediately
+            # unfold to individual characters.
+            if any(self._reachable_characters(nth_predicate.args[1].n_type) for nth_predicate in nth_predicates):
+                continue
+
+            # For each `nth(<STRING>, elem, container)` add as instantiations all indices
+            # of occurrences of `elem`'s nonterminal withint `container`
+            sub_result: List[language.Formula] = [pattern]
+            nth_predicate: language.StructuralPredicateFormula
+            for nth_predicate in nth_predicates:
+                elem_nonterminal = nth_predicate.args[1].n_type
+                container_nonterminal = nth_predicate.args[2].n_type
+                indices: Set[int] = set([])
+                for input_subtrees in inputs_subtrees:
+                    container_trees = [
+                        (path, subtree) for path, subtree in input_subtrees.items()
+                        if subtree.value == container_nonterminal]
+
+                    for container_path, container_tree in container_trees:
+                        num_occs = len([
+                            subtree for path, subtree in input_subtrees.items()
+                            if (len(path) > len(container_path) and
+                                path[:len(container_path)] == container_path and
+                                subtree.value == elem_nonterminal)])
+
+                        indices.update(list(range(1, num_occs + 1)))
+
+                for partial_result in list(sub_result):
+                    sub_result.remove(partial_result)
+
+                    def replace_placeholder_by_idx(
+                            index: int, subformula: language.Formula) -> language.Formula | bool:
+                        if (not isinstance(subformula, language.StructuralPredicateFormula) or
+                                subformula.predicate != isla_predicates.NTH_PREDICATE or
+                                not isinstance(subformula.args[0], StringPlaceholderVariable)):
+                            return False
+
+                        return language.StructuralPredicateFormula(
+                            subformula.predicate, str(index), subformula.args[1], subformula.args[2]
+                        )
+
+                    sub_result.extend([
+                        language.replace_formula(pattern, functools.partial(replace_placeholder_by_idx, index))
+                        for index in indices])
+
+            result.update(sub_result)
+
+        return result
+
+    @lru_cache(maxsize=100)
+    def _reachable_characters(self, symbol: str) -> Optional[Set[str]]:
+        if not is_nonterminal(symbol):
+            return {symbol}
+
+        if any(len(expansion) > 1 for expansion in self.canonical_grammar[symbol]):
+            return None
+
+        expansion_elements = {
+            element for expansion in self.canonical_grammar[symbol]
+            for element in expansion
+        }
+
+        if all(len(element) == 1 and not is_nonterminal(element)
+               for element in expansion_elements):
+            return expansion_elements
+
+        children_results = [
+            self._reachable_characters(element)
+            for element in expansion_elements
+        ]
+
+        if any(child_result is None for child_result in children_results):
+            return None
+
+        return set(functools.reduce(set.__or__, children_results))
+
     def _instantiate_string_placeholders(
             self,
             inst_patterns: Set[language.Formula],
@@ -973,36 +1075,9 @@ class InvariantLearner:
         #       is why those nonterminal fragments would not be pruned.
         trivial_fragments_exclusion_threshold = 10
 
-        @lru_cache(maxsize=100)
-        def reachable_characters(symbol: str) -> Optional[Set[str]]:
-            if not is_nonterminal(symbol):
-                return {symbol}
-
-            if any(len(expansion) > 1 for expansion in self.canonical_grammar[symbol]):
-                return None
-
-            expansion_elements = {
-                element for expansion in self.canonical_grammar[symbol]
-                for element in expansion
-            }
-
-            if all(len(element) == 1 and not is_nonterminal(element)
-                   for element in expansion_elements):
-                return expansion_elements
-
-            children_results = [
-                reachable_characters(element)
-                for element in expansion_elements
-            ]
-
-            if any(child_result is None for child_result in children_results):
-                return None
-
-            return set(functools.reduce(set.__or__, children_results))
-
         many_trivial_terminal_parents: Set[str] = set([])
         for nonterminal in self.grammar:
-            reachable = reachable_characters(nonterminal)
+            reachable = self._reachable_characters(nonterminal)
             if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
                 many_trivial_terminal_parents.add(nonterminal)
 
@@ -1369,6 +1444,8 @@ class InReFilter(PatternInstantiationFilter):
                            (is_in_re_formula(f.formula) or
                             (z3.is_not(f.formula) and is_in_re_formula(f.formula.children()[0]))))
             ).collect(formula))
+
+        # TODO: Only return success for contexts matching possible structural restrictions
 
         if not smt_in_re_formulas:
             return True

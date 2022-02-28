@@ -163,7 +163,7 @@ class AbstractISLaEmitter(ISLaEmitter):
         elif ctx.STRING():
             self.predicate_args[ctx] = text[1:-1]
         elif text == STRING_PLACEHOLDER:
-            self.predicate_args[ctx] = NonterminalStringPlaceholderVariable(
+            self.predicate_args[ctx] = StringPlaceholderVariable(
                 f"STRING_{self.next_string_placeholder_index}")
             self.next_string_placeholder_index += 1
         elif text == NONTERMINAL_PLACEHOLDER:

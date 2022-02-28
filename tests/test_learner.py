@@ -16,7 +16,7 @@ from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
-from isla_formalizations.csv import CSV_GRAMMAR
+from isla_formalizations.csv import CSV_GRAMMAR, CSV_HEADERBODY_GRAMMAR
 
 from grammars import toml_grammar
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
@@ -652,18 +652,24 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         self.assertIn(strip_ws(expected_constraint_4), nonzero_precision_results)
 
     def test_csv_value_types(self):
-        content = '''a;b;c
-1;2;3
+        content = '''Idx;Date;Name;Perc
+1;2022-02-28;"Dominic Steinhoefel";.1
+17;2021-12-01;"John Doe";17.0
 '''
+        expected_constraint_1 = """
+forall <csv-body> container in start:
+  forall <csv-record> row in container:
+    exists <raw-field> column in row:
+      (nth("1", column, row) and
+      (str.in_re column (re.++ (re.opt (str.to_re "-")) (re.+ (re.range "0" "9")))))"""
 
-        tree = language.DerivationTree.from_parse_tree(list(EarleyParser(CSV_GRAMMAR).parse(content))[0])
+        tree = language.DerivationTree.from_parse_tree(list(EarleyParser(CSV_HEADERBODY_GRAMMAR).parse(content))[0])
 
         ##############
         repo = patterns_from_file()
         candidates = InvariantLearner(
-            toml_grammar,
+            CSV_HEADERBODY_GRAMMAR,
             None,
-            mexpr_expansion_limit=2
         ).generate_candidates(
             repo["Value Type is Integer (CSV)"],
             [tree]
@@ -672,22 +678,22 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         print(len(candidates))
         print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
 
-        # self.assertIn(
-        #     strip_ws(expected_constraint_4),
-        #     list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-        # )
+        self.assertIn(
+            strip_ws(expected_constraint_1),
+            list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        )
 
         return
         ##############
 
         result = InvariantLearner(
-            toml_grammar,
+            CSV_HEADERBODY_GRAMMAR,
             prop=None,
             activated_patterns={
-                "Value Type is Date (TOML)",
-                "Value Type is Integer (TOML)",
-                "Value Type is String (TOML)",
-                "Value Type is Float (TOML)",
+                "Value Type is Integer (CSV)",
+                "Value Type is Float (CSV)",
+                "Value Type is String (CSV)",
+                "Value Type is Date (CSV)",
             },
             positive_examples=[tree]
         ).learn_invariants()
@@ -703,9 +709,6 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
             [r for r, p in result.items() if p > .0])))
 
         self.assertIn(strip_ws(expected_constraint_1), nonzero_precision_results)
-        self.assertIn(strip_ws(expected_constraint_2), nonzero_precision_results)
-        self.assertIn(strip_ws(expected_constraint_3), nonzero_precision_results)
-        self.assertIn(strip_ws(expected_constraint_4), nonzero_precision_results)
 
     def test_string_equality_filter(self):
         repo = patterns_from_file()
