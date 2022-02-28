@@ -1381,7 +1381,7 @@ class InReFilter(PatternInstantiationFilter):
                 z3_formula = (smt_in_re_formula.formula.children()[0]
                               if z3.is_not(smt_in_re_formula.formula)
                               else smt_in_re_formula.formula)
-                regex = evaluate_z3_expression(z3_formula.children()[1])
+                regex = re.compile(f"^{evaluate_z3_expression(z3_formula.children()[1])}$")
 
                 matching_chains = [chain for chain in variable_chains if chain[0] == variable]
                 assert len(matching_chains) == 1
@@ -1393,7 +1393,7 @@ class InReFilter(PatternInstantiationFilter):
                     if not subtree.value == variable.n_type:
                         continue
 
-                    if not re.match(f"^{regex}$", str(subtree)):
+                    if not regex.match(str(subtree)):
                         success = False
                         continue
 

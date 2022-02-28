@@ -57,12 +57,32 @@ forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
 [[Types]]
 
 name = "Value Type is String (TOML)"
+# '"' [^\n"]* '"'
 constraint = '''
 forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
   ((= key <?STRING>) implies
    (str.in_re value (re.++ (str.to_re """")
                            (re.* (re.comp (re.union (str.to_re "\n") (str.to_re """"))))
                            (str.to_re """"))))
+'''
+
+[[Types]]
+
+name = "Value Type is Float (TOML)"
+# [+-]? ( [0-9]+ ([.][0-9]*)? | [.][0-9]+)$
+constraint = '''
+forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
+  ((= key <?STRING>) implies
+   (str.in_re value
+     (re.++
+       (re.opt (re.union (str.to_re "+") (str.to_re "-")))
+       (re.union
+         (re.++
+           (re.+ (re.range "0" "9"))
+           (re.++ (str.to_re ".") (re.* (re.range "0" "9"))))
+         (re.++
+           (str.to_re ".")
+           (re.+ (re.range "0" "9")))))))
 '''
 
 [[Universal]]
