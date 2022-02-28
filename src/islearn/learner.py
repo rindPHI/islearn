@@ -1336,7 +1336,7 @@ class StringEqualityFilter(PatternInstantiationFilter):
 
 
 @lru_cache()
-def compile_z3_regexp(z3_regexp: z3.ReRef):
+def compile_z3_regexp(z3_regexp: z3.ReRef) -> re.Pattern:
     return re.compile(f"^{evaluate_z3_expression(z3_regexp)}$")
 
 
