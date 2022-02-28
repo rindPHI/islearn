@@ -1335,6 +1335,11 @@ class StringEqualityFilter(PatternInstantiationFilter):
         return False
 
 
+@lru_cache()
+def compile_z3_regexp(z3_regexp: z3.ReRef):
+    return re.compile(f"^{evaluate_z3_expression(z3_regexp)}$")
+
+
 class InReFilter(PatternInstantiationFilter):
     def __init__(self):
         super().__init__("InRe Filter")
@@ -1381,7 +1386,7 @@ class InReFilter(PatternInstantiationFilter):
                 z3_formula = (smt_in_re_formula.formula.children()[0]
                               if z3.is_not(smt_in_re_formula.formula)
                               else smt_in_re_formula.formula)
-                regex = re.compile(f"^{evaluate_z3_expression(z3_formula.children()[1])}$")
+                regex = compile_z3_regexp(z3_formula.children()[1])
 
                 matching_chains = [chain for chain in variable_chains if chain[0] == variable]
                 assert len(matching_chains) == 1
@@ -1424,8 +1429,6 @@ class InReFilter(PatternInstantiationFilter):
                 return True
 
         return False
-
-
 
 
 class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
