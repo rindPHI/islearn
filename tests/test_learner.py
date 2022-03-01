@@ -13,7 +13,7 @@ from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.helpers import strip_ws
-from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
+from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
@@ -21,7 +21,7 @@ from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from grammars import toml_grammar, JSON_GRAMMAR
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
 from islearn.learner import patterns_from_file, InvariantLearner, StringEqualityFilter, \
-    create_input_reachability_relation, InVisitor
+    create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
 
 
 class TestLearner(unittest.TestCase):
@@ -50,19 +50,19 @@ forall <expr> use_ctx in start:
             for inp in raw_inputs]
 
         #########
-        candidates = InvariantLearner(
-            scriptsizec.SCRIPTSIZE_C_GRAMMAR,
-            prop,
-            activated_patterns={"Def-Use (C)"},
-            positive_examples=inputs
-        ).generate_candidates(
-            patterns_from_file()["Def-Use (C)"],
-            inputs)
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # candidates = InvariantLearner(
+        #     scriptsizec.SCRIPTSIZE_C_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Def-Use (C)"},
+        #     positive_examples=inputs
+        # ).generate_candidates(
+        #     patterns_from_file()["Def-Use (C)"],
+        #     inputs)
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##########
 
         result = InvariantLearner(
@@ -771,6 +771,41 @@ forall <document> container in start:
         str_eq_filter = StringEqualityFilter()
         self.assertFalse(str_eq_filter.predicate(wrong_formula, [subtrees]))
         self.assertTrue(str_eq_filter.predicate(correct_formula, [subtrees]))
+
+    def test_evaluation_c_defuse(self):
+        property = parse_isla("""
+forall <expr> use_ctx in start:
+  forall <id> use in use_ctx:
+    exists <declaration> def_ctx="int {<id> def};" in start:
+      (before(def_ctx, use_ctx) and
+      (= use def))""", scriptsizec.SCRIPTSIZE_C_GRAMMAR, structural_predicates={BEFORE_PREDICATE})
+
+        inp = language.DerivationTree.from_parse_tree(
+            next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse("{int c;c < 0;}")))
+
+        subtrees = tuple(inp.paths())
+
+        self.assertTrue(approximately_evaluate_abst_for(
+            property,
+            scriptsizec.SCRIPTSIZE_C_GRAMMAR,
+            {language.Constant("start", "<start>"): ((), inp)},
+            dict(subtrees)).is_true())
+
+    def test_evaluation_xml_balance(self):
+        property = parse_isla("""
+forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in start:
+  (= opid clid)""", xml_lang.XML_GRAMMAR)
+
+        inp = language.DerivationTree.from_parse_tree(
+            next(EarleyParser(xml_lang.XML_GRAMMAR).parse("<a>b</a>")))
+
+        subtrees = tuple(inp.paths())
+
+        self.assertTrue(approximately_evaluate_abst_for(
+            property,
+            xml_lang.XML_GRAMMAR,
+            {language.Constant("start", "<start>"): ((), inp)},
+            dict(subtrees)).is_true())
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()
