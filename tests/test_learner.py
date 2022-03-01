@@ -444,20 +444,20 @@ forall <arith_expr> container_0 in start:
             trees.append(tree)
 
         ##############
-        repo = patterns_from_file()
-        candidates = InvariantLearner(
-            toml_grammar,
-            None,
-            positive_examples=trees
-        ).generate_candidates(
-            repo["String Existence"],  # repo["Universal"], # repo["Existence Strings Relative Order"]
-            trees
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     toml_grammar,
+        #     None,
+        #     positive_examples=trees
+        # ).generate_candidates(
+        #     repo["String Existence"],  # repo["Universal"], # repo["Existence Strings Relative Order"]
+        #     trees
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##############
 
         result = InvariantLearner(

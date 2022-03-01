@@ -49,8 +49,6 @@ class TruthTableRow:
         self.inputs = list(inputs)
         self.eval_results: List[bool] = list(eval_results)
 
-        isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(evaluate_z3_expression)
-
     def evaluate(
             self,
             grammar: Grammar,
@@ -218,6 +216,9 @@ class InvariantLearner:
             min_precision: float = .6,
             max_disjunction_size: int = 1,
             max_conjunction_size: int = 2):
+        isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(evaluate_z3_expression)
+        isla.language.DerivationTree.__str__ = lru_cache(maxsize=None)(isla.language.DerivationTree.__str__)
+
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)
         self.graph = gg.GrammarGraph.from_grammar(grammar)
