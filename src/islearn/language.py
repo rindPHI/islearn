@@ -1,17 +1,17 @@
 import re
 from abc import ABC
 from dataclasses import dataclass
-from typing import Set, Optional, Callable, List, Tuple, cast, Dict, Union
+from typing import Set, Optional, Callable, List, Tuple, cast, Dict
 
 import antlr4
 import z3
 from antlr4 import InputStream
 from isla import language
-from isla.helpers import get_symbols, smt_expr_to_str
 from isla.isla_predicates import STANDARD_STRUCTURAL_PREDICATES, STANDARD_SEMANTIC_PREDICATES
 from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, VariableManager, Variable, Formula, \
     parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter
 from isla.type_defs import Grammar
+from isla.z3_helpers import get_symbols, smt_expr_to_str
 
 from islearn.isla_language.IslaLanguageLexer import IslaLanguageLexer
 from islearn.isla_language.IslaLanguageParser import IslaLanguageParser

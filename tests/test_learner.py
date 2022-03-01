@@ -4,7 +4,7 @@ import math
 import re
 import string
 import unittest
-from typing import cast, Tuple
+from typing import cast, Tuple, Set
 
 import pytest
 from fuzzingbook.Grammars import srange
@@ -143,7 +143,7 @@ x
             correct_property.strip(),
             map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
 
-    # @pytest.mark.flaky(reruns=5, reruns_delay=2)
+    @pytest.mark.flaky(reruns=5, reruns_delay=2)
     def test_learn_invariants_mexpr_xml(self):
         correct_property = """
 forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in start:
@@ -164,20 +164,20 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
             for inp in raw_inputs]
 
         ##########
-        candidates = InvariantLearner(
-            xml_lang.XML_GRAMMAR,
-            prop,
-            activated_patterns={"Balance"},
-            positive_examples=inputs
-        ).generate_candidates(
-            patterns_from_file()["Balance"],
-            inputs
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # candidates = InvariantLearner(
+        #     xml_lang.XML_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Balance"},
+        #     positive_examples=inputs
+        # ).generate_candidates(
+        #     patterns_from_file()["Balance"],
+        #     inputs
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##########
 
         result = InvariantLearner(
@@ -427,7 +427,6 @@ forall <arith_expr> container_0 in start:
         self.assertTrue(any(re.match(correct_property_2_re, r) for r in nonzero_precision_results))
 
     def test_learn_from_islearn_patterns_file(self):
-        # TODO Takes too long, check.
         # islearn_repo_content = pkgutil.get_data("islearn", STANDARD_PATTERNS_REPO).decode("UTF-8").strip()
 
         repo = patterns_from_file()
@@ -522,6 +521,33 @@ forall <key> elem in start:
         # print(len(result))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
         self.assertIn(expected, result)
+
+    def test_str_len_ph_instantiations(self):
+        repo = patterns_from_file()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(repo)))[0])
+
+        pattern = parse_abstract_isla("""
+forall <key> elem in start:
+  (<= (str.len elem) (str.to.int <?STRING>))""")
+
+        result = InvariantLearner(
+            toml_grammar,
+            prop=None,
+        )._get_string_placeholder_instantiations(
+            {pattern}, [dict(tree.paths())]
+        )
+
+        self.assertEqual(1, len(result))
+        self.assertEqual(1, len(list(result.values())[0]))
+        insts: Set[str] = list(list(result.values())[0].values())[0]
+
+        self.assertIn("name", insts)
+        self.assertIn("constraint", insts)
+        self.assertIn("11", insts)
+        self.assertIn("Types", insts)
+        self.assertIn("Def-Use", insts)
+        self.assertIn("Existential", insts)
+        self.assertIn("Misc", insts)
 
     def test_instantiate_nonterminal_placeholders_toml(self):
         graph = gg.GrammarGraph.from_grammar(toml_grammar)

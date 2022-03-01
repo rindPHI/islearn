@@ -1,5 +1,6 @@
 import copy
 import functools
+import inspect
 import itertools
 import logging
 import os.path
@@ -17,12 +18,15 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate, matches_for_quantified_formula
 from isla.existential_helpers import paths_between
-from isla.helpers import is_z3_var, z3_subst, RE_NONTERMINAL, weighted_geometric_mean, \
-    visit_z3_expr, is_nonterminal, evaluate_z3_expression, ThreeValuedTruth, is_valid, DomainError
+from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
+    is_nonterminal, dict_of_lists_to_list_of_dicts
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval
 from isla.solver import ISLaSolver
+from isla.three_valued_truth import ThreeValuedTruth
 from isla.type_defs import Grammar, ParseTree, Path
+from isla.z3_helpers import z3_subst, visit_z3_expr, evaluate_z3_expression, is_valid, \
+    DomainError, is_z3_var
 from orderedset import OrderedSet
 from pathos import multiprocessing as pmp
 
@@ -216,8 +220,11 @@ class InvariantLearner:
             min_precision: float = .6,
             max_disjunction_size: int = 1,
             max_conjunction_size: int = 2):
-        isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(evaluate_z3_expression)
-        isla.language.DerivationTree.__str__ = lru_cache(maxsize=None)(isla.language.DerivationTree.__str__)
+        # We add extended caching to the evaluation of Z3 expressions and the string conversion for DerivationTrees.
+        isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
+            inspect.unwrap(evaluate_z3_expression))
+        isla.language.DerivationTree.__str__ = lru_cache(maxsize=None)(
+            inspect.unwrap(isla.language.DerivationTree.__str__))
 
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)
@@ -446,7 +453,7 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating match expression placeholders",
                          len(pattern_insts_without_mexpr_placeholders))
 
-            pattern_insts_without_mexpr_placeholders = self.filter_partial_instantiations(
+            pattern_insts_without_mexpr_placeholders = self._filter_partial_instantiations(
                 pattern_insts_without_mexpr_placeholders, inputs_subtrees)
             logger.debug("%d instantiations remain after filtering",
                          len(pattern_insts_without_mexpr_placeholders))
@@ -464,7 +471,7 @@ class InvariantLearner:
             # pattern_insts_without_mexpr_placeholders = self._apply_filters(
             #     pattern_insts_without_special_string_placeholders, filters, 0, inputs_subtrees)
 
-            pattern_insts_without_special_string_placeholders = self.filter_partial_instantiations(
+            pattern_insts_without_special_string_placeholders = self._filter_partial_instantiations(
                 pattern_insts_without_special_string_placeholders, inputs_subtrees)
             logger.debug("%d instantiations remain after filtering",
                          len(pattern_insts_without_special_string_placeholders))
@@ -476,7 +483,7 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
                          len(pattern_insts_without_nonterminal_string_placeholders))
 
-            pattern_insts_without_nonterminal_string_placeholders = self.filter_partial_instantiations(
+            pattern_insts_without_nonterminal_string_placeholders = self._filter_partial_instantiations(
                 pattern_insts_without_nonterminal_string_placeholders, inputs_subtrees)
             logger.debug("%d instantiations remain after filtering",
                          len(pattern_insts_without_nonterminal_string_placeholders))
@@ -485,8 +492,29 @@ class InvariantLearner:
                 pattern_insts_without_nonterminal_string_placeholders, filters, 1, inputs_subtrees)
 
             # 5. String placeholders
-            pattern_insts_without_string_placeholders = self._instantiate_string_placeholders(
+            string_placeholder_insts = self._get_string_placeholder_instantiations(
                 pattern_insts_without_nonterminal_string_placeholders, inputs_subtrees)
+
+            pattern_insts_without_string_placeholders: Set[language.Formula] = set([])
+            for formula in string_placeholder_insts:
+                if not string_placeholder_insts[formula]:
+                    pattern_insts_without_string_placeholders.add(formula)
+                    continue
+
+                instantiations: List[Dict[StringPlaceholderVariable, str]] = dict_of_lists_to_list_of_dicts(
+                    string_placeholder_insts[formula])
+                for instantiation in instantiations:
+                    if any(not approximately_evaluate_abst_for(
+                            formula,
+                            self.grammar,
+                            {language.Constant("start", "<start>"): ((), subtrees[()])} | instantiation,
+                            subtrees).is_false() for subtrees in inputs_subtrees):
+                        instantiated_formula = formula
+                        for ph, inst in instantiation.items():
+                            instantiated_formula = language.replace_formula(
+                                instantiated_formula,
+                                functools.partial(substitute_string_placeholder, ph, inst))
+                        pattern_insts_without_string_placeholders.add(instantiated_formula)
 
             logger.debug("Found %d instantiations of pattern after instantiating string placeholders",
                          len(pattern_insts_without_string_placeholders))
@@ -494,24 +522,11 @@ class InvariantLearner:
             assert all(not get_placeholders(candidate)
                        for candidate in pattern_insts_without_string_placeholders)
 
-            pattern_insts_without_string_placeholders = self.filter_partial_instantiations(
-                pattern_insts_without_string_placeholders, inputs_subtrees)
-            logger.debug("%d instantiations remain after filtering",
-                         len(pattern_insts_without_string_placeholders))
-
             result.update(pattern_insts_without_string_placeholders)
-
-            # pattern_insts_meeting_atom_requirements: Set[language.Formula] = \
-            #     set(pattern_insts_without_string_placeholders)
-            #
-            # pattern_insts_meeting_atom_requirements = self._apply_filters(
-            #     pattern_insts_meeting_atom_requirements, filters, 2, inputs_subtrees)
-            #
-            # result.update(pattern_insts_meeting_atom_requirements)
 
         return result
 
-    def filter_partial_instantiations(
+    def _filter_partial_instantiations(
             self,
             formulas: Iterable[language.Formula],
             inputs_subtrees: Iterable[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
@@ -1077,28 +1092,6 @@ class InvariantLearner:
             self,
             inst_patterns: Set[language.Formula],
             inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
-        def substitute_string_placeholder(
-                inst: str, ph: PlaceholderVariable, formula: language.Formula) -> language.Formula | bool:
-            if not any(v == ph for v in formula.free_variables()
-                       if isinstance(v, StringPlaceholderVariable)):
-                return False
-
-            if isinstance(formula, language.SMTFormula):
-                return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
-                    ph.to_smt(): z3.StringVal(inst)
-                })), *[v for v in formula.free_variables() if v != ph])
-            elif isinstance(formula, language.StructuralPredicateFormula):
-                return language.StructuralPredicateFormula(
-                    formula.predicate,
-                    *[inst if arg == ph else arg for arg in formula.args]
-                )
-            elif isinstance(formula, language.SemanticPredicateFormula):
-                return language.SemanticPredicateFormula(
-                    formula.predicate,
-                    *[inst if arg == ph else arg for arg in formula.args]
-                )
-
-            return False
 
         if all(not isinstance(placeholder, StringPlaceholderVariable)
                for inst_pattern in inst_patterns
@@ -1181,7 +1174,7 @@ class InvariantLearner:
                 sub_result: Set[language.Formula] = {subformula}
                 for ph in ph_vars:
                     sub_result = {
-                        language.replace_formula(f, functools.partial(substitute_string_placeholder, inst, ph))
+                        language.replace_formula(f, functools.partial(substitute_string_placeholder, ph, inst))
                         for f in set(sub_result)
                         for inst in insts
                     }
@@ -1192,6 +1185,129 @@ class InvariantLearner:
 
         return result
 
+    def _get_string_placeholder_instantiations(
+            self,
+            inst_patterns: Set[language.Formula],
+            inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> \
+            Dict[language.Formula, Dict[StringPlaceholderVariable, Set[str]]]:
+        if all(not isinstance(placeholder, StringPlaceholderVariable)
+               for inst_pattern in inst_patterns
+               for placeholder in get_placeholders(inst_pattern)):
+            return dict.fromkeys(inst_patterns)
+
+        # NOTE: To reduce the search space, we also exclude fragments for nonterminals which
+        #       have more than `trivial_fragments_exclusion_threshold` terminal children.
+        #       This is rather arbitrary, but avoids finding all kinds of spurious invariants
+        #       like "there is an 'e' in the text" which are likely to hold any many cases.
+        #       10 is the length of a typical <DIGIT> nonterminal expansion set, which
+        #       is why those nonterminal fragments would not be pruned.
+        trivial_fragments_exclusion_threshold = 10
+
+        many_trivial_terminal_parents: Set[str] = set([])
+        for nonterminal in self.grammar:
+            reachable = self._reachable_characters(nonterminal)
+            if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
+                many_trivial_terminal_parents.add(nonterminal)
+
+        fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
+        for inp in inputs_subtrees:
+            remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(
+                sorted(cast(List[Tuple[Path, language.DerivationTree]], list(inp.items())),
+                       key=lambda p: len(p[0])))
+            handled_paths: Dict[str, Set[Path]] = {nonterminal: set([]) for nonterminal in self.grammar}
+            while remaining_paths:
+                path, tree = remaining_paths.pop(0)
+                if not is_nonterminal(tree.value):
+                    continue
+
+                single_child_ancestors: List[language.DerivationTree] = [tree]
+                while len(single_child_ancestors[-1].children) == 1:
+                    single_child_ancestors.append(single_child_ancestors[-1].children[0])
+
+                if any(child.value in many_trivial_terminal_parents for child in single_child_ancestors):
+                    continue
+
+                tree_string = str(tree)
+                if not tree_string:
+                    continue
+
+                # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
+                #       "1234", don't include the <digits> "34". This might lead
+                #       to imprecision, but otherwise the search room tends to explode.
+                if any(len(opath) < len(path) and opath == path[:len(opath)]
+                       for opath in handled_paths[tree.value]):
+                    continue
+
+                handled_paths[tree.value].add(path)
+                fragments[tree.value].add(tree_string)
+                fragments[tree.value].add(str(len(tree_string)))
+
+                # For strings representing floats, we also include the rounded Integers.
+                if is_float(tree_string) and not is_int(tree_string):
+                    fragments[tree.value].add(str(int(float(tree_string))))
+                    fragments[tree.value].add(str(int(float(tree_string)) + 1))
+
+        logger.debug(
+            "Extracted %d language fragments from sample inputs",
+            sum(len(value) for value in fragments.values()))
+
+        result: Dict[language.Formula, Dict[StringPlaceholderVariable, Set[str]]] = {}
+        for inst_pattern in inst_patterns:
+            def extract_instantiations(subformula: language.Formula) -> None:
+                nonlocal result
+
+                if not any(isinstance(arg, StringPlaceholderVariable) for arg in subformula.free_variables()):
+                    return
+
+                non_ph_vars = {v for v in subformula.free_variables() if not isinstance(v, PlaceholderVariable)}
+
+                insts: Set[str] = set(functools.reduce(
+                    set.__or__, [fragments.get(var.n_type, set([])) for var in non_ph_vars]))
+
+                ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariable)}
+                for ph in ph_vars:
+                    result.setdefault(inst_pattern, {}).setdefault(ph, set([])).update(insts)
+
+            class InstantiationVisitor(language.FormulaVisitor):
+                def visit_smt_formula(self, formula: language.SMTFormula):
+                    extract_instantiations(formula)
+
+                def visit_predicate_formula(self, formula: language.StructuralPredicateFormula):
+                    extract_instantiations(formula)
+
+                def visit_semantic_predicate_formula(self, formula: language.SemanticPredicateFormula):
+                    extract_instantiations(formula)
+
+            inst_pattern.accept(InstantiationVisitor())
+
+        return result
+
+
+def substitute_string_placeholder(
+        ph: PlaceholderVariable,
+        inst: str,
+        formula: language.Formula) -> language.Formula | bool:
+    if not any(v == ph for v in formula.free_variables()
+               if isinstance(v, StringPlaceholderVariable)):
+        return False
+
+    if isinstance(formula, language.SMTFormula):
+        return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
+            ph.to_smt(): z3.StringVal(inst)
+        })), *[v for v in formula.free_variables() if v != ph])
+    elif isinstance(formula, language.StructuralPredicateFormula):
+        return language.StructuralPredicateFormula(
+            formula.predicate,
+            *[inst if arg == ph else arg for arg in formula.args]
+        )
+    elif isinstance(formula, language.SemanticPredicateFormula):
+        return language.SemanticPredicateFormula(
+            formula.predicate,
+            *[inst if arg == ph else arg for arg in formula.args]
+        )
+
+    return False
+
 
 @lru_cache
 def z3_string_val(string: str) -> z3.StringVal:
@@ -1201,10 +1317,12 @@ def z3_string_val(string: str) -> z3.StringVal:
 def approximately_evaluate_abst_for(
         formula: language.Formula,
         grammar: Grammar,
-        assignments: Dict[language.Variable, Tuple[Path, language.DerivationTree]],
+        assignments: Dict[language.Variable, Tuple[Path, language.DerivationTree] | str],
         subtrees: Dict[Path, language.DerivationTree]) -> ThreeValuedTruth:
+    # TODO: Handle String placeholder variables in predicate formulas
     if isinstance(formula, language.SMTFormula):
-        if any(isinstance(arg, PlaceholderVariable) for arg in formula.free_variables()):
+        if any(isinstance(arg, PlaceholderVariable) and arg not in assignments
+               for arg in formula.free_variables()):
             return ThreeValuedTruth.unknown()
 
         if any(var not in assignments for var in formula.free_variables()):
@@ -1219,9 +1337,17 @@ def approximately_evaluate_abst_for(
                 for var in assignments
             }
 
-            args_instantiation = tuple([
-                str(assignments[var_map[arg]][1])
-                for arg in translation[0]])
+            # args_instantiation = tuple([
+            #     str(assignments[var_map[arg]][1])
+            #     for arg in translation[0]])
+
+            args_instantiation = ()
+            for arg in translation[0]:
+                var = var_map[arg]
+                if isinstance(var, StringPlaceholderVariable):
+                    args_instantiation += (assignments[var],)
+                else:
+                    args_instantiation += (str(assignments[var][1]),)
 
             return ThreeValuedTruth.from_bool(
                 translation[1](args_instantiation) if args_instantiation
@@ -1276,11 +1402,14 @@ def approximately_evaluate_abst_for(
         if not new_assignments:
             return ThreeValuedTruth.false()
 
-        # We demand *any* match. This is both stronger (vacuous satisfaction impossible) and
-        # weaker (one match suffices) for universal formulas.
-        return ThreeValuedTruth.from_bool(any(
-            not approximately_evaluate_abst_for(formula.inner_formula, grammar, new_assignment, subtrees).is_false()
-            for new_assignment in new_assignments))
+        if isinstance(formula, language.ExistsFormula):
+            return ThreeValuedTruth.from_bool(any(
+                not approximately_evaluate_abst_for(formula.inner_formula, grammar, new_assignment, subtrees).is_false()
+                for new_assignment in new_assignments))
+        else:
+            return ThreeValuedTruth.from_bool(all(
+                not approximately_evaluate_abst_for(formula.inner_formula, grammar, new_assignment, subtrees).is_false()
+                for new_assignment in new_assignments))
     elif isinstance(formula, language.StructuralPredicateFormula):
         if any(isinstance(arg, PlaceholderVariable) for arg in formula.args):
             return ThreeValuedTruth.unknown()
