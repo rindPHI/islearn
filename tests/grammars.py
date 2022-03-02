@@ -1,10 +1,12 @@
 import string
 
-from fuzzingbook.Grammars import srange
+from fuzzingbook.Grammars import srange, CHARACTERS_WITHOUT_QUOTE
 
 # NOTE: To make this a PEG grammar, we need to escape single quotes within
 #       multiline literal strings. So, a multiline string with """ is the
 #       same as a multiline string with ''', just with different quotation marks.
+from isla.type_defs import Grammar
+
 toml_grammar = {
     "<start>": ["<document>"],
     "<document>": ["<expressions>"],
@@ -150,4 +152,28 @@ toml_grammar = {
     "<UNQUOTED_KEY>": ["<UNQUOTED_KEY_CHARS>"],
     "<UNQUOTED_KEY_CHARS>": ["<UNQUOTED_KEY_CHAR><UNQUOTED_KEY_CHARS>", "<UNQUOTED_KEY_CHAR>"],
     "<UNQUOTED_KEY_CHAR>": ["<ALPHA>", "<DIGIT>", "-", "_"]
+}
+
+JSON_GRAMMAR: Grammar = {
+    "<start>": ["<json>"],
+    "<json>": ["<element>"],
+    "<element>": ["<ws><value><ws>"],
+    "<value>": ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"],
+    "<object>": ["{<members>}", "{<ws>}"],
+    "<members>": ["<member>,<members>", "<member>"],
+    "<member>": ["<ws><string><ws>:<element>"],
+    "<array>": ["[<ws>]", "[<elements>]"],
+    "<elements>": ["<element>,<elements>", "<element>"],
+    "<string>": ['"' + "<characters>" + '"'],
+    "<characters>": ["<character><characters>", ""],
+    "<character>": srange(CHARACTERS_WITHOUT_QUOTE),
+    "<number>": ["<int><frac><exp>"],
+    "<int>": ["-<onenine><digits>", "<onenine><digits>", "-<digit>", "<digit>"],
+    "<digits>": ["<digit><digits>", "<digit>"],
+    "<digit>": ['0', "<onenine>"],
+    "<onenine>": ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    "<frac>": [".<digits>", ""],
+    "<exp>": ["E<sign><digits>", "e<sign><digits>", ""],
+    "<sign>": ['+', '-', ""],
+    "<ws>": [" "]
 }

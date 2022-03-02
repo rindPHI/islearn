@@ -4,32 +4,29 @@ import math
 import re
 import string
 import unittest
-from typing import cast, Tuple
+from typing import cast, Tuple, Set
 
 import pytest
-from fuzzingbook.Grammars import JSON_GRAMMAR, srange
+from fuzzingbook.Grammars import srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.helpers import strip_ws
-from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES
+from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
-from isla_formalizations.csv import CSV_GRAMMAR, CSV_HEADERBODY_GRAMMAR
+from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 
-from grammars import toml_grammar
+from grammars import toml_grammar, JSON_GRAMMAR
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
 from islearn.learner import patterns_from_file, InvariantLearner, StringEqualityFilter, \
-    create_input_reachability_relation, InVisitor
+    create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
 
 
 class TestLearner(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.json_grammar = copy.deepcopy(JSON_GRAMMAR)
-        self.json_grammar["<value>"] = ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"]
-        self.json_grammar["<int>"] = ["<digit>", "<onenine><digits>", "-<digit>", "-<onenine><digits>"]
 
     @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_mexpr_scriptsize_c(self):
@@ -231,7 +228,7 @@ exists int num:
             for inp in raw_inputs]
 
         candidates = InvariantLearner(csv.CSV_GRAMMAR, prop, inputs).generate_candidates([pattern], inputs)
-        # print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
+        print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
         self.assertIn(correct_property.strip(), list(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
@@ -294,24 +291,41 @@ forall <json> container in start:
             ' { "key" : 13 } ',
             ' { "asdf" : [ 26 ] , "key" : "x" } ',
         ]
-        trees = [language.DerivationTree.from_parse_tree(next(EarleyParser(self.json_grammar).parse(inp)))
+
+        # inputs = [
+        #     ' { "asdf?" : [ 26 ] , "key" : "x" } ',
+        #     ' { "asdf" : [ 26 ] , "key" : "x" } ',
+        #     ' { "key" : { "key" : false } , "" : false , "lR" : true , "" : null , "lR" : { "key" : { "." : [ -0 , false , true , null , false ] } } } ',
+        #     ' { "key" : { "key" : 16 } , "" : false , "ld" : true , "" : { } , "lR" : { "" : null } } ',
+        #     ' { "key" : { "key" : { "." : [ -0 , false , true , null , false ] } , "" : false , "lR" : true , "" : null , "lR" : { "" : null } } , "ey" : { "" : null } } ',
+        #     ' { "key" : { "key" : { "." : [ -0 , false , true , null , false ] } , "" : false , "lR" : true , "" : null , "lR" : { "" : null } } , "ey" : { "kee" : null } } ',
+        #     ' { "key" : { "sey" : { "key" : 13 } , "lsdf" : false , "2R" : true , "" : null , "" : { "z" : 16 } } , "" : "x" , "lR" : true , "d" : null , "ey" : { "kd" : { "asdR?" : "e" , "?ey" : "x" } } } ',
+        #     ' { "key" : { "kee" : { "asdR?" : "x" , "rey" : "x" } , "" : "x" , "lR" : true , "d" : 10 , "e" : { "kee" : { "" : "" } } } , "" : { "6v$." : false } , "lR" : "h" , "" : null , "ey" : { "" : null } } ',
+        #     ' { "key" : { "kXy" : { "key" : 13 } , "lsdf" : false , "l(" : { "Nr" : true , "asdR?" : "x" , "" : false } , "" : null , "lR" : { "q" : null } } , "" : false , "kke" : false , "" : null , "i" : { "key" : { "asdRx" : "dRx" , "kei" : "x" } } } ',
+        #     ' { "key" : { "key" : { "." : [ 10 , false , true , null , false ] } , "." : false , "q" : "du" , "" : null , "lR" : { "x" : { "" : null } , "" : false , "" : null , "" : { "lR" : { "asdf" : null , "lR" : true , "" : { "lR" : null } , "lR" : { "" : null } } } , "key" : { "key" : 16 } } } , "ey" : { "kee" : null } } '
+        # ]
+
+        trees = [language.DerivationTree.from_parse_tree(PEGParser(JSON_GRAMMAR).parse(inp)[0])
                  for inp in inputs]
 
-        # candidates = generate_candidates(
-        #     [patterns_from_file()["String Existence"]],
+        ###############
+        # candidates = InvariantLearner(
+        #     JSON_GRAMMAR,
+        # ).generate_candidates(
+        #     patterns_from_file()["String Existence"],
         #     trees,
-        #     self.json_grammar
         # )
         #
         # print(len(candidates))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
         #
         # return
+        ###############
 
-        self.assertTrue(all(evaluate(correct_property, tree, self.json_grammar) for tree in trees))
+        self.assertTrue(all(evaluate(correct_property, tree, JSON_GRAMMAR) for tree in trees))
 
         result = InvariantLearner(
-            self.json_grammar,
+            JSON_GRAMMAR,
             prop,
             activated_patterns={"String Existence"},
             positive_examples=trees,
@@ -435,7 +449,7 @@ forall <arith_expr> container_0 in start:
         #     None,
         #     positive_examples=trees
         # ).generate_candidates(
-        #     repo["Universal"],  # repo["String Existence"],  # repo["Existence Strings Relative Order"]
+        #     repo["String Existence"],  # repo["Universal"], # repo["Existence Strings Relative Order"]
         #     trees
         # )
         #
@@ -507,6 +521,33 @@ forall <key> elem in start:
         # print(len(result))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
         self.assertIn(expected, result)
+
+    def test_str_len_ph_instantiations(self):
+        repo = patterns_from_file()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(repo)))[0])
+
+        pattern = parse_abstract_isla("""
+forall <key> elem in start:
+  (<= (str.len elem) (str.to.int <?STRING>))""")
+
+        result = InvariantLearner(
+            toml_grammar,
+            prop=None,
+        )._get_string_placeholder_instantiations(
+            {pattern}, [dict(tree.paths())]
+        )
+
+        self.assertEqual(1, len(result))
+        self.assertEqual(1, len(list(result.values())[0]))
+        insts: Set[str] = list(list(result.values())[0].values())[0]
+
+        self.assertIn("name", insts)
+        self.assertIn("constraint", insts)
+        self.assertIn("11", insts)
+        self.assertIn("Types", insts)
+        self.assertIn("Def-Use", insts)
+        self.assertIn("Existential", insts)
+        self.assertIn("Misc", insts)
 
     def test_instantiate_nonterminal_placeholders_toml(self):
         graph = gg.GrammarGraph.from_grammar(toml_grammar)
@@ -666,24 +707,24 @@ forall <csv-body> container in start:
         tree = language.DerivationTree.from_parse_tree(list(EarleyParser(CSV_HEADERBODY_GRAMMAR).parse(content))[0])
 
         ##############
-        repo = patterns_from_file()
-        candidates = InvariantLearner(
-            CSV_HEADERBODY_GRAMMAR,
-            None,
-        ).generate_candidates(
-            repo["Value Type is Integer (CSV)"],
-            [tree]
-        )
-
-        print(len(candidates))
-        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        self.assertIn(
-            strip_ws(expected_constraint_1),
-            list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-        )
-
-        return
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     CSV_HEADERBODY_GRAMMAR,
+        #     None,
+        # ).generate_candidates(
+        #     repo["Value Type is Integer (CSV)"],
+        #     [tree]
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # self.assertIn(
+        #     strip_ws(expected_constraint_1),
+        #     list(map(strip_ws, map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        # )
+        #
+        # return
         ##############
 
         result = InvariantLearner(
@@ -730,6 +771,41 @@ forall <document> container in start:
         str_eq_filter = StringEqualityFilter()
         self.assertFalse(str_eq_filter.predicate(wrong_formula, [subtrees]))
         self.assertTrue(str_eq_filter.predicate(correct_formula, [subtrees]))
+
+    def test_evaluation_c_defuse(self):
+        property = parse_isla("""
+forall <expr> use_ctx in start:
+  forall <id> use in use_ctx:
+    exists <declaration> def_ctx="int {<id> def};" in start:
+      (before(def_ctx, use_ctx) and
+      (= use def))""", scriptsizec.SCRIPTSIZE_C_GRAMMAR, structural_predicates={BEFORE_PREDICATE})
+
+        inp = language.DerivationTree.from_parse_tree(
+            next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse("{int c;c < 0;}")))
+
+        subtrees = tuple(inp.paths())
+
+        self.assertTrue(approximately_evaluate_abst_for(
+            property,
+            scriptsizec.SCRIPTSIZE_C_GRAMMAR,
+            {language.Constant("start", "<start>"): ((), inp)},
+            dict(subtrees)).is_true())
+
+    def test_evaluation_xml_balance(self):
+        property = parse_isla("""
+forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in start:
+  (= opid clid)""", xml_lang.XML_GRAMMAR)
+
+        inp = language.DerivationTree.from_parse_tree(
+            next(EarleyParser(xml_lang.XML_GRAMMAR).parse("<a>b</a>")))
+
+        subtrees = tuple(inp.paths())
+
+        self.assertTrue(approximately_evaluate_abst_for(
+            property,
+            xml_lang.XML_GRAMMAR,
+            {language.Constant("start", "<start>"): ((), inp)},
+            dict(subtrees)).is_true())
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()
