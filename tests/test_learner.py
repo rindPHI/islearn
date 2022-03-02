@@ -20,7 +20,7 @@ from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 
 from grammars import toml_grammar, JSON_GRAMMAR
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
-from islearn.learner import patterns_from_file, InvariantLearner, StringEqualityFilter, \
+from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
 
 
@@ -750,27 +750,6 @@ forall <csv-body> container in start:
             [r for r, p in result.items() if p > .0])))
 
         self.assertIn(strip_ws(expected_constraint_1), nonzero_precision_results)
-
-    def test_string_equality_filter(self):
-        repo = patterns_from_file()
-
-        islearn_repo_content = str(repo)
-        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(islearn_repo_content))[0])
-        subtrees = dict(tree.paths())
-
-        wrong_formula = language.parse_isla("""
-forall <array_table> container in start:
-  exists <unquoted_key> elem in container:
-    (= elem "name")""", toml_grammar)
-
-        correct_formula = language.parse_isla("""
-forall <document> container in start:
-  exists <key> elem in container:
-    (= elem "constraint")""", toml_grammar)
-
-        str_eq_filter = StringEqualityFilter()
-        self.assertFalse(str_eq_filter.predicate(wrong_formula, [subtrees]))
-        self.assertTrue(str_eq_filter.predicate(correct_formula, [subtrees]))
 
     def test_evaluation_c_defuse(self):
         property = parse_isla("""
