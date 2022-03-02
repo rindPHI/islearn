@@ -1354,10 +1354,6 @@ def approximately_evaluate_abst_for(
                 if subtrees[path].value == formula.bound_variable.n_type:
                     new_assignments.append({formula.bound_variable: (path, subtrees[path])})
                     root_path_indices.append(path_idx + in_path_idx + 1)
-
-            # if formula.bind_expression is not None:
-            #     new_assignments = match_match_expression(formula, new_assignments, paths, root_path_indices, subtrees)
-
         else:
             paths = list(subtrees.keys())
             in_path_idx = paths.index(in_path)
@@ -1433,93 +1429,6 @@ def approximately_evaluate_abst_for(
             for sub_formula in formula.args))
     else:
         raise NotImplementedError()
-
-
-def match_match_expression(
-        formula: language.QuantifiedFormula,
-        assignments: List[Dict[language.Variable, Tuple[Path, language.DerivationTree]]],
-        paths: List[Path],
-        root_path_indices: List[int],
-        subtrees: Dict[Path, language.DerivationTree]) -> \
-        List[Dict[language.Variable, Tuple[Path, language.DerivationTree]]]:
-    # NOTE: This is experimental, and seems not to beat the performance of the ISLa matcher,
-    #       which is also more robust and should thus be preferred.
-    # NOTE: This implementation does not handle optional elements in match expressions,
-    #       and will not work if dummy variables have to be split or merged since
-    #       the way nonterminals are grouped differes in the match expression and
-    #       the derivation tree.
-
-    bound_elements: List[language.Variable] = formula.bind_expression.bound_elements
-
-    result = list(assignments)
-    for idx, assignment in enumerate(list(result)):
-        result.remove(assignment)
-        potential_assignments: Dict[language.Variable, List[Tuple[Path, language.DerivationTree]]] = {
-            bound_element: [] for bound_element in bound_elements
-        }
-        root_path_index = root_path_indices[idx]
-        root_path = assignment[formula.bound_variable][0]
-
-        leaf_paths = ()
-        for path in paths[root_path_index + 1:]:
-            if len(path) <= len(root_path):
-                break
-
-            subtree = subtrees[path]
-            if not subtree.children:
-                leaf_paths += (path,)
-            matching_elements = [
-                bound_element for bound_element in bound_elements
-                if (isinstance(bound_element, language.DummyVariable) and
-                    is_nonterminal(bound_element.n_type) and
-                    bound_element.n_type == subtree.value) or
-                   (isinstance(bound_element, language.DummyVariable) and
-                    not is_nonterminal(bound_element.n_type) and
-                    bound_element.n_type == str(subtree)) or
-                   (not isinstance(bound_element, language.DummyVariable) and
-                    bound_element.n_type == subtree.value)]
-            for matching_element in matching_elements:
-                potential_assignments[matching_element].append((path, subtree))
-
-        if not potential_assignments:
-            continue
-
-        for potential_assignment in dict_of_lists_to_list_of_dicts(potential_assignments):
-            if len(potential_assignment) < len(bound_elements):
-                continue
-
-            assignment_paths = [path for path, _ in potential_assignment.values()]
-
-            # For a correct match, the assignment paths have to be non-nested and correctly ordered.
-            if not all(is_before(None, assignment_paths[idx], assignment_paths[idx + 1])
-                       for idx in range(len(assignment_paths) - 1)):
-                continue
-
-            # Furthermore, for a complete match, there must not be any leaf
-            # not below some matched element's path.
-            unmatched_leaf_paths = list(leaf_paths)
-
-            curr_assignment_path = assignment_paths.pop(0)
-            curr_leaf_path = unmatched_leaf_paths.pop(0)
-            while assignment_paths or unmatched_leaf_paths:
-                if (len(curr_assignment_path) <= len(curr_leaf_path) and
-                        curr_leaf_path[:len(curr_assignment_path)] == curr_assignment_path):
-                    if unmatched_leaf_paths:
-                        curr_leaf_path = unmatched_leaf_paths.pop(0)
-                    else:
-                        break
-                else:
-                    if assignment_paths:
-                        curr_assignment_path = assignment_paths.pop(0)
-                    else:
-                        break
-
-            if unmatched_leaf_paths or assignment_paths:
-                continue
-
-            result.append(assignment | potential_assignment)
-
-    return result
 
 
 class PatternInstantiationFilter(ABC):
