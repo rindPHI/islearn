@@ -2,11 +2,12 @@ import random
 import string
 import unittest
 
+import scapy.all as scapy
 from fuzzingbook.Parser import PEGParser
 from pythonping import icmp
 
-from grammars import ICMP_GRAMMAR
-from islearn.checksums import bytes_to_hex
+from grammars import ICMP_GRAMMAR, IPv4_GRAMMAR
+from islearn.islearn_predicates import bytes_to_hex, hex_to_bytes
 
 
 class TestGrammars(unittest.TestCase):
@@ -51,10 +52,26 @@ class TestGrammars(unittest.TestCase):
         self.assertTrue(icmp_obj.is_valid)
         packet_bytes = list(bytearray(icmp_packet))
 
-        icmp_packet_hex_dump = bytes_to_hex(packet_bytes).upper()
+        icmp_packet_hex_dump = bytes_to_hex(packet_bytes)
 
         parser = PEGParser(ICMP_GRAMMAR)
         self.assertTrue(parser.parse(icmp_packet_hex_dump + " "))
+
+    def test_ip_packet(self):
+        for _ in range(10):
+            size = random.randint(0, 16) * 2
+            random_text = ''.join(random.choice("ABCDEF" + string.digits) for _ in range(size))
+            payload = bytes(hex_to_bytes(random_text))
+
+            icmp = scapy.ICMP()
+            icmp.payload = scapy.Raw(payload)
+            icmp.id = random.randint(0, 0xFFFF // 2)  # // 2 because of short format
+            icmp.seq = random.randint(0, 0xFFFF // 2)
+
+            p = scapy.IP(dst="8.8.8.8") / icmp
+            ip_packet_hex_dump = bytes_to_hex(list(bytes(p)))
+
+            self.assertTrue(PEGParser(IPv4_GRAMMAR).parse(ip_packet_hex_dump + " "))
 
 
 if __name__ == '__main__':

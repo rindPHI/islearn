@@ -9,14 +9,15 @@ from isla.language import parse_isla
 from pythonping import icmp
 
 from grammars import ICMP_GRAMMAR
-from islearn.checksums import compute_internet_checksum, internet_checksum, INTERNET_CHECKSUM_PREDICATE, bytes_to_hex, \
-    hex_to_bytes
+from islearn.islearn_predicates import compute_internet_checksum, internet_checksum, INTERNET_CHECKSUM_PREDICATE, \
+    bytes_to_hex, \
+    hex_to_bytes, hex_to_dec, hex_to_int
 from islearn.learner import approximately_evaluate_abst_for
 
 
 class TestGrammars(unittest.TestCase):
     def test_compute_internet_checksum(self):
-        self.assertEqual(0b1101, compute_internet_checksum([0b1011, 0b0110], length=4))
+        self.assertEqual(0b1101, compute_internet_checksum((0b1011, 0b0110), length=4))
 
     def test_internet_checksum_predicate(self):
         parser = PEGParser(ICMP_GRAMMAR)
@@ -118,6 +119,14 @@ forall <start> container in start:
             tree = language.DerivationTree.from_parse_tree(PEGParser(ICMP_GRAMMAR).parse(icmp_packet_hex_dump + " ")[0])
 
             self.assertTrue(evaluate(checksum_constraint, tree, ICMP_GRAMMAR).is_true())
+
+    def test_hex_to_decimal(self):
+        hex_str = "12 34 56 78 "
+        parser = PEGParser(ICMP_GRAMMAR, start_symbol="<bytes>")
+        hex_tree = language.DerivationTree.from_parse_tree(parser.parse(hex_str)[0])
+        decimal_constant = language.Constant("decimal", "<decimal>")
+        result = hex_to_dec(None, hex_tree, decimal_constant)
+        self.assertEqual(str(hex_to_int(hex_str)), str(result.result[decimal_constant]))
 
 
 if __name__ == '__main__':

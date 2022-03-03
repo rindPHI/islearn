@@ -13,7 +13,7 @@ from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, V
 from isla.type_defs import Grammar
 from isla.z3_helpers import get_symbols, smt_expr_to_str
 
-from islearn.checksums import INTERNET_CHECKSUM_PREDICATE
+from islearn.islearn_predicates import INTERNET_CHECKSUM_PREDICATE, HEX_TO_DEC_PREDICATE
 from islearn.isla_language.IslaLanguageLexer import IslaLanguageLexer
 from islearn.isla_language.IslaLanguageParser import IslaLanguageParser
 from islearn.mexpr_lexer.MexprLexer import MexprLexer
@@ -223,7 +223,10 @@ class AbstractMExprEmitter(MExprEmitter, MexprParserListener.MexprParserListener
         self.result.append(mexpr_placeholder)
 
 
-ISLEARN_STANDARD_SEMANTIC_PREDICATES = STANDARD_SEMANTIC_PREDICATES | {INTERNET_CHECKSUM_PREDICATE}
+ISLEARN_STANDARD_SEMANTIC_PREDICATES = STANDARD_SEMANTIC_PREDICATES | {
+    INTERNET_CHECKSUM_PREDICATE,
+    HEX_TO_DEC_PREDICATE,
+}
 
 
 def parse_abstract_isla(

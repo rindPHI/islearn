@@ -229,6 +229,26 @@ forall <?NONTERMINAL> container in start:
        (= occ_1 <?STRING>))
 '''
 
+[[Existential]]
+
+name = "Existence Length Field"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  exists <?NONTERMINAL> length_field in container:
+    (= (str.len container) (str.to.int length_field))
+'''
+
+[[Existential]]
+
+name = "Existence Length Field (Hex)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  exists <?NONTERMINAL> length_field in container:
+    exists int decimal:
+      (hex_to_decimal(length_field, decimal) and
+       (= (div (str.len (str.replace_all container " " "")) 2) (str.to.int decimal)))
+'''
+
 [[Checksums]]
 
 name = "Internet Checksum (RFC 1071)"

@@ -8,12 +8,12 @@ import unittest
 from typing import cast, Tuple, Set
 
 import pytest
+import scapy.all as scapy
 from fuzzingbook.Grammars import srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
-from isla.fuzzer import GrammarCoverageFuzzer
 from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
@@ -21,8 +21,8 @@ from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
 
-from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR
-from islearn.checksums import hex_to_bytes, bytes_to_hex
+from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR
+from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
@@ -844,6 +844,83 @@ forall <icmp_message> container in start:
         self.assertIn(expected_checksum_constraint, result.keys())
         self.assertIn(type_constraint, result.keys())
         self.assertIn(code_constraint, result.keys())
+
+    def test_ip_icmp_ping_request(self):
+        ip_header_constraint = parse_abstract_isla("""
+forall <header> container in start:
+  exists <header_checksum> checksum in container:
+    internet_checksum(container, checksum)""", IPv4_GRAMMAR)
+
+        protocol_constraint = parse_abstract_isla("""
+forall <header> container in start:
+  exists <protocol> elem in container:
+    (nth("1", elem, container) and
+    (= elem "01 "))""", IPv4_GRAMMAR)
+
+        identification_constraint = parse_abstract_isla("""
+forall <header> container in start:
+  exists <identification> elem in container:
+    (nth("1", elem, container) and
+    (= elem "00 01 "))""", IPv4_GRAMMAR)
+
+        icmp_type_constraint = parse_abstract_isla("""
+forall <data> container in start:
+  exists <byte> elem in container:
+    (nth("1", elem, container) and
+    (= elem "08 "))""", IPv4_GRAMMAR)
+
+        icmp_code_constraint = parse_abstract_isla("""
+forall <data> container in start:
+  exists <byte> elem in container:
+    (nth("2", elem, container) and
+    (= elem "00 "))""", IPv4_GRAMMAR)
+
+        length_constraint = parse_abstract_isla("""
+forall <ip_message> container in start:
+  exists <total_length> length_field in container:
+    exists int decimal:
+      (hex_to_decimal(length_field, decimal) and
+      (= (div (str.len (str.replace_all container " " "")) 2) (str.to.int decimal)))""", IPv4_GRAMMAR)
+
+        inputs: Set[language.DerivationTree] = set([])
+        for _ in range(30):
+            size = random.randint(0, 16) * 2
+            random_text = ''.join(random.choice("ABCDEF" + string.digits) for _ in range(size))
+            payload = bytes(hex_to_bytes(random_text))
+
+            icmp = scapy.ICMP()
+            icmp.payload = scapy.Raw(payload)
+            icmp.id = random.randint(0, 0xFFFF // 2)  # // 2 because of short format
+            icmp.seq = random.randint(0, 0xFFFF // 2)
+
+            p = scapy.IP(dst="8.8.8.8") / icmp
+            ip_packet_hex_dump = bytes_to_hex(list(bytes(p)))
+
+            inputs.add(language.DerivationTree.from_parse_tree(
+                PEGParser(IPv4_GRAMMAR).parse(ip_packet_hex_dump + " ")[0]))
+
+        result = InvariantLearner(
+            IPv4_GRAMMAR,
+            prop=None,
+            activated_patterns={
+                "Checksums",
+                "Positioned String Existence (CSV)",
+                "Existence Length Field (Hex)",
+            },
+            positive_examples=inputs
+        ).learn_invariants()
+
+        # print(len(result))
+        # print("\n".join(map(
+        #     lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
+        #     {f: p for f, p in result.items() if p > .0}.items())))
+
+        self.assertIn(ip_header_constraint, result.keys())
+        self.assertIn(protocol_constraint, result.keys())
+        self.assertIn(identification_constraint, result.keys())
+        self.assertIn(icmp_type_constraint, result.keys())
+        self.assertIn(icmp_code_constraint, result.keys())
+        self.assertIn(length_constraint, result.keys())
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

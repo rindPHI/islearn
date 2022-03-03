@@ -1,10 +1,10 @@
 import itertools
 import math
+import re
 from functools import reduce
 from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict, Sequence
 
 import isla.language
-from isla import language
 from isla.type_defs import Path
 from pathos import multiprocessing as pmp
 
@@ -255,3 +255,7 @@ class BinaryDerivationTreeNode:
         self.orig_path = orig_path
         self.left = left
         self.right = right
+
+
+def remove_spaces(inp: str) -> str:
+    return re.sub(r"\s+", "", str(inp))

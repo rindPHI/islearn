@@ -22,7 +22,8 @@ toml_grammar = {
     "<quoted_key>": ["<BASIC_STRING>", "<LITERAL_STRING>"],
     "<dotted_key>": ["<simple_key><dot_simple_key>"],
     "<dot_simple_key>": [".<simple_key><dot_simple_key>", ".<simple_key>"],
-    "<value>": ["<string>", "<date_time>", "<LOCAL_DATE>", "<floating_point>", "<integer>", "<bool>", "<array>", "<inline_table>"],
+    "<value>": ["<string>", "<date_time>", "<LOCAL_DATE>", "<floating_point>", "<integer>", "<bool>", "<array>",
+                "<inline_table>"],
     "<string>": ["<ML_BASIC_STRING>", "<BASIC_STRING>", "<ML_LITERAL_STRING>", "<LITERAL_STRING>"],
     "<integer>": ["<DEC_INT>", "<HEX_INT>", "<OCT_INT>", "<BIN_INT>"],
     "<floating_point>": ["<FLOAT>", "<INF>", "<NAN>"],
@@ -187,7 +188,34 @@ ICMP_GRAMMAR = {
     "<code>": ["<byte>"],
     "<checksum>": ["<byte><byte>"],
     "<header_data>": ["<byte><byte><byte><byte>"],
-    "<bytes>": ["<byte><bytes>", ""],
     "<byte>": ["<zerof><zerof> "],
+    "<bytes>": ["<byte><bytes>", ""],
+    "<zerof>": srange(string.digits + "ABCDEF")
+}
+
+# https://en.wikipedia.org/wiki/IPv4#Packet_structure
+IPv4_GRAMMAR = {
+    "<start>": ["<ip_message>"],
+    "<ip_message>": ["<header><data>"],
+    "<header>": [  # Each line 4 bytes
+        "<version_ihl><dscp_ecn><total_length>"
+        "<identification><flags_offset>"
+        "<ttl><protocol><header_checksum>"
+        "<source_ip>"
+        "<dest_ip>"
+    ],
+    "<data>": ["<bytes>"],
+    "<version_ihl>": ["<byte>"],
+    "<dscp_ecn>": ["<byte>"],
+    "<total_length>": ["<byte><byte>"],
+    "<identification>": ["<byte><byte>"],
+    "<flags_offset>": ["<byte><byte>"],
+    "<ttl>": ["<byte>"],
+    "<protocol>": ["<byte>"],
+    "<header_checksum>": ["<byte><byte>"],
+    "<source_ip>": ["<byte><byte><byte><byte>"],
+    "<dest_ip>": ["<byte><byte><byte><byte>"],
+    "<byte>": ["<zerof><zerof> "],
+    "<bytes>": ["<byte><bytes>", ""],
     "<zerof>": srange(string.digits + "ABCDEF")
 }
