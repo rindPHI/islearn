@@ -797,16 +797,17 @@ forall <icmp_message> container in start:
     internet_checksum(container, checksum)""", ICMP_GRAMMAR, semantic_predicates=ISLEARN_STANDARD_SEMANTIC_PREDICATES)
 
         type_constraint = parse_abstract_isla("""
-forall <icmp_message> container in start:
-  exists <byte> elem in container:
-    (nth("1", elem, container) and
-    (= elem "08 "))""", ICMP_GRAMMAR)
+(forall <icmp_message> container in start:
+   exists <type> elem in container:
+     (= elem "08 ") or
+forall <icmp_message> container_0 in start:
+  exists <type> elem_0 in container_0:
+    (= elem_0 "00 "))""", ICMP_GRAMMAR)
 
         code_constraint = parse_abstract_isla("""
 forall <icmp_message> container in start:
-  exists <byte> elem in container:
-    (nth("2", elem, container) and
-    (= elem "00 "))""", ICMP_GRAMMAR)
+  exists <code> elem in container:
+    (= elem "00 ")""", ICMP_GRAMMAR)
 
         inputs: Set[language.DerivationTree] = set([])
         for _ in range(50):
@@ -815,7 +816,7 @@ forall <icmp_message> container in start:
             payload = bytes(hex_to_bytes(random_text))
 
             icmp_packet = icmp.ICMP(
-                icmp.Types.EchoRequest,
+                icmp.Types.EchoReply if random.random() < .5 else icmp.Types.EchoRequest,
                 payload=payload,
                 identifier=random.randint(0, 0xFFFF),
                 sequence_number=random.randint(0, 0xFFFF // 2)  # // 2 because of short format
@@ -831,9 +832,11 @@ forall <icmp_message> container in start:
             prop=None,
             activated_patterns={
                 "Checksums",
-                "Positioned String Existence (CSV)",
+                # "Positioned String Existence (CSV)",
+                "String Existence",
             },
-            positive_examples=inputs
+            positive_examples=inputs,
+            max_disjunction_size=2
         ).learn_invariants()
 
         print(len(result))
@@ -854,14 +857,12 @@ forall <header> container in start:
         protocol_constraint = parse_abstract_isla("""
 forall <header> container in start:
   exists <protocol> elem in container:
-    (nth("1", elem, container) and
-    (= elem "01 "))""", IPv4_GRAMMAR)
+    (= elem "01 ")""", IPv4_GRAMMAR)
 
         identification_constraint = parse_abstract_isla("""
 forall <header> container in start:
   exists <identification> elem in container:
-    (nth("1", elem, container) and
-    (= elem "00 01 "))""", IPv4_GRAMMAR)
+    (= elem "00 01 ")""", IPv4_GRAMMAR)
 
         icmp_type_constraint = parse_abstract_isla("""
 forall <data> container in start:
@@ -904,6 +905,7 @@ forall <ip_message> container in start:
             prop=None,
             activated_patterns={
                 "Checksums",
+                "String Existence",
                 "Positioned String Existence (CSV)",
                 "Existence Length Field (Hex)",
             },

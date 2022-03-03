@@ -322,12 +322,12 @@ class InvariantLearner:
                                if idx_1 != idx_2):
                         continue
 
-                    conjunction = functools.reduce(TruthTableRow.__or__, rows)
-                    new_eval_result = conjunction.eval_result()
+                    disjunction = functools.reduce(TruthTableRow.__or__, rows)
+                    new_eval_result = disjunction.eval_result()
                     if not all(new_eval_result > row.eval_result() for row in rows):
                         continue
 
-                    disjunctive_precision_truthtable.rows.add(conjunction)
+                    disjunctive_precision_truthtable.rows.add(disjunction)
 
             recall_truth_table = disjunctive_precision_truthtable
 
@@ -336,7 +336,7 @@ class InvariantLearner:
         #       a weaker one, drop the weaker one. This is basically a static precision filter.
 
         invariants = {
-            row.formula for row in recall_truth_table
+            language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
             if row.eval_result() >= self.min_recall
         }
 
@@ -377,12 +377,12 @@ class InvariantLearner:
                            if idx_1 != idx_2):
                     continue
 
-                conjunction = functools.reduce(TruthTableRow.__and__, rows)
-                new_eval_result = conjunction.eval_result()
+                disjunction = functools.reduce(TruthTableRow.__and__, rows)
+                new_eval_result = disjunction.eval_result()
                 if not all(new_eval_result < row.eval_result() for row in rows):
                     continue
 
-                conjunctive_precision_truthtable.rows.add(conjunction)
+                conjunctive_precision_truthtable.rows.add(disjunction)
 
         precision_truth_table = conjunctive_precision_truthtable
 
