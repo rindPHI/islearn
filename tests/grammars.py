@@ -177,3 +177,17 @@ JSON_GRAMMAR: Grammar = {
     "<sign>": ['+', '-', ""],
     "<ws>": [" "]
 }
+
+ICMP_GRAMMAR = {
+    "<start>": ["<icmp_message>"],
+    "<icmp_message>": ["<header><payload_data>"],
+    "<header>": ["<type><code><checksum><header_data>"],
+    "<payload_data>": ["<bytes>"],
+    "<type>": ["<byte>"],
+    "<code>": ["<byte>"],
+    "<checksum>": ["<byte><byte>"],
+    "<header_data>": ["<byte><byte><byte><byte>"],
+    "<bytes>": ["<byte><bytes>", ""],
+    "<byte>": ["<zerof><zerof> "],
+    "<zerof>": srange(string.digits + "ABCDEF")
+}

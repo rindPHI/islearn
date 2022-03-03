@@ -12,13 +12,14 @@ from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
+from isla.fuzzer import GrammarCoverageFuzzer
 from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 
-from grammars import toml_grammar, JSON_GRAMMAR
+from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
