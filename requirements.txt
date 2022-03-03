@@ -122,6 +122,7 @@ pytz==2021.3
 pyzmq==22.2.1
 qtconsole==5.1.1
 reportlab==3.6.3
+scapy>=2.4.5
 scikit-learn==1.0.1
 scipy==1.7.3
 selenium==4.1.0
