@@ -1,8 +1,12 @@
+import random
+import string
 import unittest
 
 from fuzzingbook.Parser import PEGParser
+from pythonping import icmp
 
 from grammars import ICMP_GRAMMAR
+from islearn.checksums import bytes_to_hex
 
 
 class TestGrammars(unittest.TestCase):
@@ -35,6 +39,22 @@ class TestGrammars(unittest.TestCase):
 
         checksum = ((sum & no_carry_mask) + ((sum & carry_mask) >> length)) ^ no_carry_mask
         self.assertEqual(0b1101, checksum)
+
+    def test_random_ping_packet_creation(self):
+        size = random.randint(0, 32)
+        random_text = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(size))
+
+        icmp_obj = icmp.ICMP(
+            icmp.Types.EchoRequest, payload=random_text, identifier=random.randint(0, 0xFFFF),
+            sequence_number=random.randint(0, 0xFFFF))
+        icmp_packet = icmp_obj.packet
+        self.assertTrue(icmp_obj.is_valid)
+        packet_bytes = list(bytearray(icmp_packet))
+
+        icmp_packet_hex_dump = bytes_to_hex(packet_bytes).upper()
+
+        parser = PEGParser(ICMP_GRAMMAR)
+        self.assertTrue(parser.parse(icmp_packet_hex_dump + " "))
 
 
 if __name__ == '__main__':

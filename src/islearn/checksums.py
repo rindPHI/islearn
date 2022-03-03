@@ -48,8 +48,10 @@ INTERNET_CHECKSUM_PREDICATE = language.SemanticPredicate("internet_checksum", 2,
 
 
 def compute_internet_checksum(inp_bytes: Sequence[int], length=16) -> int:
-    assert len(inp_bytes) % 2 == 0
-    assert all(inp_byte < 0b11111111 for inp_byte in inp_bytes)
+    if len(inp_bytes) % 2 != 0:
+        inp_bytes = tuple(inp_bytes) + (0x00,)
+
+    assert all(inp_byte <= 0xFF for inp_byte in inp_bytes)
     assert length < 8 or length % 8 == 0
 
     if length < 8:
@@ -78,6 +80,8 @@ def hex_to_bytes(hex_str: str) -> List[int]:
 
 def int_to_hex(number: int, add_spaces=True) -> str:
     result = list(hex(number)[2:])
+    if len(result) % 2 != 0:
+        result.insert(0, "0")
     if add_spaces:
         for i in reversed(range(len(result))):
             if i > 0 and i % 2 == 0:

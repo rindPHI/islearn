@@ -1,12 +1,16 @@
+import random
+import string
 import unittest
 
 from fuzzingbook.Parser import PEGParser
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import parse_isla
+from pythonping import icmp
 
 from grammars import ICMP_GRAMMAR
-from islearn.checksums import compute_internet_checksum, internet_checksum, INTERNET_CHECKSUM_PREDICATE
+from islearn.checksums import compute_internet_checksum, internet_checksum, INTERNET_CHECKSUM_PREDICATE, bytes_to_hex, \
+    hex_to_bytes
 from islearn.learner import approximately_evaluate_abst_for
 
 
@@ -90,6 +94,30 @@ forall <start> container in start:
             ICMP_GRAMMAR,
             {language.Constant("start", "<start>"): ((), wrong_ping_request_message)},
             dict(wrong_ping_request_message.paths())).is_false())
+
+    def test_checksum_random_ping_packet(self):
+        checksum_constraint = parse_isla("""
+        forall <start> container in start:
+          forall <checksum> checksum in start:
+            internet_checksum(container, checksum)""", ICMP_GRAMMAR, semantic_predicates={INTERNET_CHECKSUM_PREDICATE})
+
+        for _ in range(100):
+            size = random.randint(0, 16) * 2
+            random_text = ''.join(random.choice("ABCDEF" + string.digits) for _ in range(size))
+            payload = bytes(hex_to_bytes(random_text))
+
+            icmp_packet = icmp.ICMP(
+                icmp.Types.EchoRequest,
+                payload=payload,
+                identifier=random.randint(0, 0xFFFF),
+                sequence_number=random.randint(0, 0xFFFF // 2)  # // 2 because of short format
+            ).packet
+            packet_bytes = list(bytearray(icmp_packet))
+            icmp_packet_hex_dump = bytes_to_hex(packet_bytes).upper()
+
+            tree = language.DerivationTree.from_parse_tree(PEGParser(ICMP_GRAMMAR).parse(icmp_packet_hex_dump + " ")[0])
+
+            self.assertTrue(evaluate(checksum_constraint, tree, ICMP_GRAMMAR).is_true())
 
 
 if __name__ == '__main__':
