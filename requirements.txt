@@ -31,6 +31,7 @@ defusedxml==0.7.1
 diff-match-patch==20200713
 dill==0.3.4
 distlib==0.3.3
+docutils>=0.18.1
 easyplotly==0.1.3
 enforce==0.3.4
 entrypoints==0.3
@@ -111,10 +112,12 @@ pytest-forked==1.3.0
 pytest-html==3.1.1
 pytest-profiling==1.7.0
 pytest-pycharm==0.7.0
+pytest-rerunfailures>=10.2
 pytest-xdist==2.4.0
 pytest==6.2.5
 python-dateutil==2.8.2
 python-magic==0.4.24
+pythonping>=1.1.1
 pytz==2021.3
 pyzmq==22.2.1
 qtconsole==5.1.1
@@ -156,5 +159,3 @@ wsproto==1.0.0
 yapf==0.31.0
 z3-solver>=4.8.8.0
 zipp==3.6.0
-docutils>=0.18.1
-pytest-rerunfailures>=10.2
