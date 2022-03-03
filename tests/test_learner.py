@@ -1,6 +1,7 @@
 import copy
 import json
 import math
+import random
 import re
 import string
 import unittest
@@ -18,9 +19,11 @@ from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
+from pythonping import icmp
 
 from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR
-from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
+from islearn.checksums import hex_to_bytes, bytes_to_hex
+from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
 
@@ -786,6 +789,61 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
             xml_lang.XML_GRAMMAR,
             {language.Constant("start", "<start>"): ((), inp)},
             dict(subtrees)).is_true())
+
+    def test_icmp_ping_request(self):
+        expected_checksum_constraint = parse_abstract_isla("""
+forall <icmp_message> container in start:
+  exists <checksum> checksum in container:
+    internet_checksum(container, checksum)""", ICMP_GRAMMAR, semantic_predicates=ISLEARN_STANDARD_SEMANTIC_PREDICATES)
+
+        type_constraint = parse_abstract_isla("""
+forall <icmp_message> container in start:
+  exists <byte> elem in container:
+    (nth("1", elem, container) and
+    (= elem "08 "))""", ICMP_GRAMMAR)
+
+        code_constraint = parse_abstract_isla("""
+forall <icmp_message> container in start:
+  exists <byte> elem in container:
+    (nth("2", elem, container) and
+    (= elem "00 "))""", ICMP_GRAMMAR)
+
+        inputs: Set[language.DerivationTree] = set([])
+        for _ in range(50):
+            size = random.randint(0, 16) * 2
+            random_text = ''.join(random.choice("ABCDEF" + string.digits) for _ in range(size))
+            payload = bytes(hex_to_bytes(random_text))
+
+            icmp_packet = icmp.ICMP(
+                icmp.Types.EchoRequest,
+                payload=payload,
+                identifier=random.randint(0, 0xFFFF),
+                sequence_number=random.randint(0, 0xFFFF // 2)  # // 2 because of short format
+            ).packet
+            packet_bytes = list(bytearray(icmp_packet))
+            icmp_packet_hex_dump = bytes_to_hex(packet_bytes).upper()
+
+            inputs.add(language.DerivationTree.from_parse_tree(
+                PEGParser(ICMP_GRAMMAR).parse(icmp_packet_hex_dump + " ")[0]))
+
+        result = InvariantLearner(
+            ICMP_GRAMMAR,
+            prop=None,
+            activated_patterns={
+                "Checksums",
+                "Positioned String Existence (CSV)",
+            },
+            positive_examples=inputs
+        ).learn_invariants()
+
+        print(len(result))
+        print("\n".join(map(
+            lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
+            {f: p for f, p in result.items() if p > .0}.items())))
+
+        self.assertIn(expected_checksum_constraint, result.keys())
+        self.assertIn(type_constraint, result.keys())
+        self.assertIn(code_constraint, result.keys())
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

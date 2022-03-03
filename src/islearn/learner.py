@@ -210,11 +210,15 @@ class InvariantLearner:
             min_precision: float = .6,
             max_disjunction_size: int = 1,
             max_conjunction_size: int = 2):
-        # We add extended caching to the evaluation of Z3 expressions and the string conversion for DerivationTrees.
+        # We add extended caching to the evaluation of Z3 expressions,
+        # the string conversion for DerivationTrees, and the paths
+        # computation for DerivationTrees.
         isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
             inspect.unwrap(evaluate_z3_expression))
         isla.language.DerivationTree.__str__ = lru_cache(maxsize=None)(
             inspect.unwrap(isla.language.DerivationTree.__str__))
+        isla.language.DerivationTree.paths = lru_cache(maxsize=128)(
+            inspect.unwrap(isla.language.DerivationTree.paths))
 
         self.grammar = grammar
         self.canonical_grammar = canonical(grammar)

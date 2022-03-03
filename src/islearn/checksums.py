@@ -1,3 +1,4 @@
+import re
 import string
 from typing import List, Sequence, Optional
 
@@ -21,7 +22,15 @@ def internet_checksum(
         "<zerof>": srange(string.digits + "ABCDEF")
     }
 
-    zero_checksum = ("<checksum>", [("00 ", []), ("00 ", [])])
+    checksum_tree_str = re.sub(r"\s+", "", str(checksum_tree))
+    if not len(checksum_tree_str) % 2 == 0:
+        return language.SemPredEvalResult(False)
+
+    zeroes = "".join("0" for _ in range(len(checksum_tree_str)))
+    if str(checksum_tree).endswith(" "):
+        zeroes += " "
+
+    zero_checksum = ("<checksum>", [(zeroes, [])])
 
     header_wo_checksum = header.replace_path(
         header.find_node(checksum_tree),
@@ -30,8 +39,12 @@ def internet_checksum(
     header_bytes: List[int] = hex_to_bytes(str(header_wo_checksum))
 
     checksum_value = int_to_hex(compute_internet_checksum(header_bytes)).upper() + " "
+    if len(checksum_value) < 6:
+        assert len(checksum_value) == 3
+        checksum_value = "00 " + checksum_value
 
-    if checksum_value == str(checksum_tree).upper():
+    checksum_value_nospace = re.sub(r"\s+", "", str(checksum_value))
+    if checksum_value_nospace == checksum_tree_str:
         return language.SemPredEvalResult(True)
 
     checksum_parser = PEGParser(checksum_grammar, start_symbol="<checksum>")

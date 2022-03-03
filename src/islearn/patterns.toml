@@ -169,6 +169,17 @@ forall <?NONTERMINAL> container in start:
     (= elem <?STRING>)
 '''
 
+
+[[Existential]]
+
+name = "Positioned String Existence (CSV)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  exists <?NONTERMINAL> elem in container:
+    (nth(<?STRING>, elem, container) and
+     (= elem <?STRING>))
+'''
+
 [[Existential]]
 
 name = "Existence String Fixed Length"
@@ -216,6 +227,15 @@ forall <?NONTERMINAL> container in start:
       (before(occ_1, occ_2) and
        (= occ_2 <?STRING>) and
        (= occ_1 <?STRING>))
+'''
+
+[[Checksums]]
+
+name = "Internet Checksum (RFC 1071)"
+constraint = '''
+forall <?NONTERMINAL> container in start:
+  exists <?NONTERMINAL> checksum in container:
+    internet_checksum(container, checksum)
 '''
 
 [[Misc]]

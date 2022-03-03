@@ -97,9 +97,9 @@ forall <start> container in start:
 
     def test_checksum_random_ping_packet(self):
         checksum_constraint = parse_isla("""
-        forall <start> container in start:
-          forall <checksum> checksum in start:
-            internet_checksum(container, checksum)""", ICMP_GRAMMAR, semantic_predicates={INTERNET_CHECKSUM_PREDICATE})
+forall <start> container in start:
+  forall <checksum> checksum in start:
+    internet_checksum(container, checksum)""", ICMP_GRAMMAR, semantic_predicates={INTERNET_CHECKSUM_PREDICATE})
 
         for _ in range(100):
             size = random.randint(0, 16) * 2

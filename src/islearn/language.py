@@ -13,6 +13,7 @@ from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, V
 from isla.type_defs import Grammar
 from isla.z3_helpers import get_symbols, smt_expr_to_str
 
+from islearn.checksums import INTERNET_CHECKSUM_PREDICATE
 from islearn.isla_language.IslaLanguageLexer import IslaLanguageLexer
 from islearn.isla_language.IslaLanguageParser import IslaLanguageParser
 from islearn.mexpr_lexer.MexprLexer import MexprLexer
@@ -222,11 +223,14 @@ class AbstractMExprEmitter(MExprEmitter, MexprParserListener.MexprParserListener
         self.result.append(mexpr_placeholder)
 
 
+ISLEARN_STANDARD_SEMANTIC_PREDICATES = STANDARD_SEMANTIC_PREDICATES | {INTERNET_CHECKSUM_PREDICATE}
+
+
 def parse_abstract_isla(
         inp: str,
         grammar: Optional[Grammar] = None,
         structural_predicates: Set[StructuralPredicate] = STANDARD_STRUCTURAL_PREDICATES,
-        semantic_predicates: Set[SemanticPredicate] = STANDARD_SEMANTIC_PREDICATES) -> Formula:
+        semantic_predicates: Set[SemanticPredicate] = ISLEARN_STANDARD_SEMANTIC_PREDICATES) -> Formula:
     class BailPrintErrorStrategy(antlr4.BailErrorStrategy):
         def recover(self, recognizer: antlr4.Parser, e: antlr4.RecognitionException):
             recognizer._errHandler.reportError(recognizer, e)
