@@ -77,19 +77,27 @@ class TestGrammars(unittest.TestCase):
             self.assertTrue(PEGParser(IPv4_GRAMMAR).parse(ip_packet_hex_dump + " "))
 
     def test_racket_bsl_grammar(self):
+        # Load all Racket BSL examples from the How to Design Programs repository.
         urls = [
-            "https://github.com/johnamata/compsci/raw/cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/019.rkt",
-            "https://github.com/johnamata/compsci/raw/cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/029.rkt"
+            f"https://github.com/johnamata/compsci/raw/"
+            f"cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/{str(i).rjust(3, '0')}.rkt"
+            for i in range(1, 30)
         ]
 
         for url in urls:
             with urllib.request.urlopen(url) as f:
                 racket_code = f.read().decode('utf-8')
+                if "GRacket" in racket_code:
+                    # Not a real racket file
+                    continue
                 racket_code = racket_code.replace("\\n", "\n")
                 racket_code = racket_code.replace("\r\n", "\n")
                 racket_code = racket_code.strip()
 
-                language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+                try:
+                    language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+                except SyntaxError as e:
+                    self.fail(f"Failed to parse URL {url} ({e}), file:\n\n{racket_code}")
 
 
 if __name__ == '__main__':

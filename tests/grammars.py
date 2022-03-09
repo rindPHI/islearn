@@ -319,7 +319,7 @@ RACKET_BSL_GRAMMAR = {
     "<definition>": [
         "(<MWSS>define<MWSS>(<MWSS><name><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)",
         "(<MWSS>define<MWSS>(<MWSS><name><MWSS>)<MWSS><expr><MWSS>)",
-        "(<MWSS>define<WSS><name><WSS><expr><MWSS>)",
+        "(<MWSS>define<WSS><name><MWSS><expr><MWSS>)",
         "(<MWSS>define<WSS><name><MWSS>(lambda<MWSS>(<MWSS><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)<MWSS>)",
         "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS><name><maybe_wss_name><MWSS>)<MWSS>)",
         "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS>)<MWSS>)",
@@ -328,28 +328,28 @@ RACKET_BSL_GRAMMAR = {
     "<WSS_NAMES>": ["<WSS><NAME><WSS_NAMES>", "<WSS><NAME>"],
     "<maybe_wss_names>": ["<WSS><name><wss_names>", "<wss><name>", ""],
 
-    "<wss_exprs>": ["<WSS><expr><wss_exprs>", "<WSS><expr>"],
+    "<wss_exprs>": ["<MWSS><expr><wss_exprs>", "<MWSS><expr>"],
 
     "<cond_args>": [
-        "[<MWSS><expr><WSS><expr><MWSS>]<MWSS><cond_args>",
-        "[<MWSS><expr><WSS><expr><MWSS>]"
+        "<maybe_comments><MWSS>[<MWSS><expr><WSS><expr><MWSS>]<MWSS><cond_args>",
+        "<maybe_comments><MWSS>[<MWSS><expr><WSS><expr><MWSS>]"
     ],
 
     "<maybe_cond_args>": ["<cond_args>", ""],
 
     "<expr>": [
-        "(<MWSS>cond<MWSS><maybe_cond_args><MWSS>[else<WSS><expr>]<MWSS>)",
-        "(<MWSS>cond<MWSS><cond_args><MWSS>)",
-        "(<MWSS>if<WSS><expr><WSS><expr><WSS><expr><MWSS>)",
-        "(<MWSS>and<WSS><expr><wss_exprs><MWSS>)",
-        "(<MWSS>or<WSS><expr><wss_exprs><MWSS>)",
-        "(<MWSS><name><wss_exprs><MWSS>)",
-        "’()",
-        "<STRING>",
-        "<NUMBER>",
-        "<BOOLEAN>",
-        "<CHARACTER>",
-        "<name>",
+        "<maybe_comments><MWSS>(<MWSS>cond<MWSS><maybe_cond_args><MWSS>[else<WSS><expr>]<MWSS>)",
+        "<maybe_comments><MWSS>(<MWSS>cond<MWSS><cond_args><MWSS>)",
+        "<maybe_comments><MWSS>(<MWSS>if<WSS><expr><WSS><expr><WSS><expr><MWSS>)",
+        "<maybe_comments><MWSS>(<MWSS>and<WSS><expr><wss_exprs><MWSS>)",
+        "<maybe_comments><MWSS>(<MWSS>or<WSS><expr><wss_exprs><MWSS>)",
+        "<maybe_comments><MWSS>(<MWSS><name><wss_exprs><MWSS>)",
+        "<maybe_comments><MWSS>’()",
+        "<maybe_comments><MWSS><STRING>",
+        "<maybe_comments><MWSS><NUMBER>",
+        "<maybe_comments><MWSS><BOOLEAN>",
+        "<maybe_comments><MWSS><CHARACTER>",
+        "<maybe_comments><MWSS><name>",
     ],
 
     "<test_case>": [
@@ -420,6 +420,7 @@ RACKET_BSL_GRAMMAR = {
     "<WSS>": ["<WS><WSS>", "<WS>"],
     "<WS>": [" ", "\t", "\n"],
 
+    "<maybe_comments>": ["<COMMENT><MWSS><maybe_comments>", ""],
     "<COMMENT>": [";<NOBRs>"],
     "<HASHDIRECTIVE>": ["#lang <NOBRs>", "#reader<NOBRs>"],
     "<NOBR>": list(set(string.printable) - {"\n", "\r"}),
