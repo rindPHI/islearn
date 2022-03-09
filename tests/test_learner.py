@@ -6,6 +6,7 @@ import re
 import string
 import unittest
 from typing import cast, Tuple, Set
+import urllib.request
 
 import pytest
 import scapy.all as scapy
@@ -21,7 +22,7 @@ from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
 
-from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR
+from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES
 from islearn.learner import patterns_from_file, InvariantLearner, \
@@ -343,15 +344,15 @@ forall <json> container in start:
             correct_property.strip(),
             list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p > .0])))
 
-    @pytest.mark.flaky(reruns=3, reruns_delay=2)
+    # @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_alhazen_sqrt_example(self):
         correct_property_1 = """
 (forall <arith_expr> container in start:
-   exists <maybe_minus> elem in container:
-     (= elem "-") and
+   exists <function> elem in container:
+     (= elem "sqrt") and
 forall <arith_expr> container_0 in start:
-  exists <function> elem_0 in container_0:
-    (= elem_0 "sqrt"))"""
+  exists <maybe_minus> elem_0 in container_0:
+    (= elem_0 "-"))"""
 
         correct_property_2_re = re.escape("""
 (forall <arith_expr> container in start:
@@ -413,7 +414,8 @@ forall <arith_expr> container_0 in start:
             prop,
             activated_patterns={"Existence Numeric String Smaller Than", "String Existence"},
             # activated_patterns={"String Existence"},
-            positive_examples=trees
+            positive_examples=trees,
+            min_recall=1.0
         ).learn_invariants()
 
         print(len(result))
@@ -796,6 +798,7 @@ forall <icmp_message> container in start:
   exists <checksum> checksum in container:
     internet_checksum(container, checksum)""", ICMP_GRAMMAR, semantic_predicates=ISLEARN_STANDARD_SEMANTIC_PREDICATES)
 
+        # -> Disjunctive invariant!
         type_constraint = parse_abstract_isla("""
 (forall <icmp_message> container in start:
    exists <type> elem in container:
@@ -923,6 +926,81 @@ forall <ip_message> container in start:
         self.assertIn(icmp_type_constraint, result.keys())
         self.assertIn(icmp_code_constraint, result.keys())
         self.assertIn(length_constraint, result.keys())
+
+    def test_learn_graphviz(self):
+        # TODO: - Improve speed (38min too slow)
+        #       - Learn disjunctive inv: exists <DIGRAPH> in <graph> ==> all <edgeop> = "->"
+        #       - Add property?
+        # urls = [
+        #     "https://raw.githubusercontent.com/ermannoGirardo/exprob_lab_assignment2/1e738dde51d0d888a8a50d22764663951399312c/ROSPlan/rosplan_dependencies/rddlsim/doc/game_of_life.dot",
+        #     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
+        #     "https://raw.githubusercontent.com/hisenyiu2015/android_kernel_realme_sm8150/d5f2e1cc211fa7e0b3bed87a836d562ceb181878/Documentation/media/uapi/v4l/pipeline.dot",
+        #     "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
+        #     # Below one is graph, not digraph
+        #     "https://github.com/nathanaelle/wireguard-topology/blob/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
+        # ]
+        #
+        # trees = []
+        # for url in urls:
+        #     with urllib.request.urlopen(url) as f:
+        #         dot_code = (re.sub(r"//.*?\n", "", f.read().decode('utf-8'))
+        #                       .replace("\\n", "\n")
+        #                       .replace("\r\n", "\n")
+        #                       .strip())
+        #     trees.append(language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
+
+        inputs = [
+            "digraph { a -> b }",
+            "graph { x -- y }",
+            "graph { u; v; u -- v }",
+            "digraph asdf { c; d; e; f; c -> d; e -> f; }",
+        ]
+        trees = [
+            language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
+            for inp in inputs]
+
+        ##############
+        # repo = patterns_from_file()
+        # candidates = InvariantLearner(
+        #     DOT_GRAMMAR,
+        #     None,
+        #     positive_examples=trees,
+        #     exclude_nonterminals={
+        #         "<WS>", "<WSS>", "<MWSS>",
+        #         "<A>", "<B>", "<C>", "<D>", "<E>", "<G>", "<H>", "<I>", "<N>", "<O>", "<P>", "<R>", "<S>", "<T>", "<U>",
+        #         "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
+        #         "<LETTER>", "<maybe_minus>", "<maybe_comma>", "<maybe_semi>"
+        #     }
+        # ).generate_candidates(
+        #     repo["String Existence"],
+        #     trees
+        # )
+        #
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
+        ##############
+
+        result = InvariantLearner(
+            DOT_GRAMMAR,
+            prop=None,
+            activated_patterns={"String Existence"},
+            positive_examples=trees,
+            max_disjunction_size=2,
+            exclude_nonterminals={
+                "<WS>", "<WSS>", "<MWSS>",
+                "<A>", "<B>", "<C>", "<D>", "<E>", "<G>", "<H>", "<I>", "<N>", "<O>", "<P>", "<R>", "<S>", "<T>", "<U>",
+                "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
+                "<LETTER>", "<maybe_minus>", "<maybe_comma>", "<maybe_semi>"
+            }
+        ).learn_invariants()
+
+        print(len(result))
+        # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+        print("\n".join(map(
+            lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
+            {f: p for f, p in result.items() if p > .0}.items())))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

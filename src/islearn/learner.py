@@ -16,11 +16,11 @@ import z3
 from fuzzingbook.Parser import canonical
 from grammar_graph import gg
 from isla import language, isla_predicates
-from isla.evaluator import evaluate, matches_for_quantified_formula
+from isla.evaluator import evaluate, matches_for_quantified_formula, implies
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
     is_nonterminal, dict_of_lists_to_list_of_dicts
 from isla.isla_predicates import reachable, is_before
-from isla.language import set_smt_auto_eval
+from isla.language import set_smt_auto_eval, ISLaUnparser
 from isla.solver import ISLaSolver
 from isla.three_valued_truth import ThreeValuedTruth
 from isla.type_defs import Grammar, ParseTree, Path
@@ -108,6 +108,9 @@ class TruthTableRow:
         return (isinstance(other, TruthTableRow) and
                 self.formula == other.formula)
 
+    def __len__(self):
+        return len(self.eval_results)
+
     def __hash__(self):
         return hash(self.formula)
 
@@ -146,6 +149,17 @@ class TruthTable:
 
     def __str__(self):
         return "\n".join(map(str, self.rows))
+
+    def __getitem__(self, item: int | language.Formula) -> TruthTableRow:
+        if isinstance(item, int):
+            return list(self.rows)[item]
+
+        assert isinstance(item, language.Formula)
+
+        try:
+            return next(row for row in self.rows if row.formula == item)
+        except StopIteration:
+            raise KeyError(item)
 
     def __iter__(self):
         return iter(self.rows)
@@ -209,7 +223,8 @@ class InvariantLearner:
             min_recall: float = .9,
             min_precision: float = .6,
             max_disjunction_size: int = 1,
-            max_conjunction_size: int = 2):
+            max_conjunction_size: int = 2,
+            exclude_nonterminals: Optional[Iterable[str]] = None):
         # We add extended caching certain, crucial functions.
         isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
             inspect.unwrap(evaluate_z3_expression))
@@ -231,6 +246,7 @@ class InvariantLearner:
         self.min_precision = min_precision
         self.max_disjunction_size = max_disjunction_size
         self.max_conjunction_size = max_conjunction_size
+        self.exclude_nonterminals = exclude_nonterminals or set([])
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -312,14 +328,28 @@ class InvariantLearner:
             #       Problem: Negation might have bad recall, that is improved by building a disjunction...
             #       Also, in the ALHAZEN-SQRT example, this gave rise to negated invs with meaningless
             #       constants, so we might have to control this somehow, at least with a config param.
-            # disjunctive_precision_truthtable |= {-row for row in recall_truth_table}
+            negations = {
+                -row for row in recall_truth_table
+                if 1 / len(row) < row.eval_result() < 1 - 1 / len(row)
+            }
+            disjunctive_precision_truthtable |= negations
+
             for level in range(2, self.max_disjunction_size + 1):
                 logger.debug(f"Disjunction size: {level}")
                 for rows in itertools.product(*[recall_truth_table for _ in range(level)]):
                     if not all(row_1 != row_2
                                for idx_1, row_1 in enumerate(rows)
                                for idx_2, row_2 in enumerate(rows)
-                               if idx_1 != idx_2):
+                               if idx_1 < idx_2):
+                        continue
+
+                    if any(row_1 == -row_2
+                           for idx_1, row_1 in enumerate(rows)
+                           for idx_2, row_2 in enumerate(rows)
+                           if idx_1 < idx_2):
+                        continue
+
+                    if all(row in negations for row in rows):
                         continue
 
                     disjunction = functools.reduce(TruthTableRow.__or__, rows)
@@ -331,17 +361,39 @@ class InvariantLearner:
 
             recall_truth_table = disjunctive_precision_truthtable
 
-        # TODO: Prefer stronger invariants, if any: Formulas with *the same* quantifier blocks imply each
-        #       other if the qfr-free cores imply each other. If a stronger inv has the same recall than
-        #       a weaker one, drop the weaker one. This is basically a static precision filter.
-
         invariants = {
             language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
             if row.eval_result() >= self.min_recall
         }
 
         logger.info("%d invariants remain after filtering.", len(invariants))
-        # logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
+
+        logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
+
+        def check_implication(invariant: language.Formula) -> Optional[language.Formula]:
+            if any(implies(other_inv, invariant, self.canonical_grammar)
+                   for other_inv in invariants
+                   if other_inv != invariant):
+                return None
+
+            return invariant
+
+        with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+            invariants = set(filter(None, pool.map(
+                check_implication, invariants
+            )))
+
+        # invariants = {
+        #     invariant_1
+        #     for idx_1, invariant_1 in enumerate(invariants)
+        #     if not any(
+        #         implies(invariant_2, invariant_1, self.canonical_grammar)
+        #         for idx_2, invariant_2 in enumerate(invariants)
+        #         if idx_1 != idx_2
+        #     )
+        # }
+
+        logger.info("%d invariant candidates remain after implication check.", len(invariants))
 
         # ne_before = len(negative_examples)
         # negative_examples.update(generate_counter_examples_from_formulas(grammar, prop, invariants))
@@ -374,7 +426,7 @@ class InvariantLearner:
                 if not all(row_1 != row_2
                            for idx_1, row_1 in enumerate(rows)
                            for idx_2, row_2 in enumerate(rows)
-                           if idx_1 != idx_2):
+                           if idx_1 < idx_2):
                     continue
 
                 disjunction = functools.reduce(TruthTableRow.__and__, rows)
@@ -772,7 +824,8 @@ class InvariantLearner:
                 partial_sequences.update({
                     partial_sequence + (to_nonterminal,)
                     for (from_nonterminal, to_nonterminal) in input_reachability_relation
-                    if from_nonterminal == partial_sequence[-1]})
+                    if (from_nonterminal == partial_sequence[-1]
+                        and to_nonterminal not in self.exclude_nonterminals)})
 
             new_instantiations = [
                 {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
@@ -1362,14 +1415,17 @@ def approximately_evaluate_abst_for(
         else:
             paths = list(subtrees.keys())
             in_path_idx = paths.index(in_path)
-            sub_paths = {in_path: in_inst}
+            sub_paths = {(): in_inst}
             for path in paths[in_path_idx + 1:]:
                 if len(path) <= len(in_path):
                     break
 
-                sub_paths[path] = subtrees[path]
+                sub_paths[path[len(in_path):]] = subtrees[path]
 
-            new_assignments = matches_for_quantified_formula(formula, grammar, subtrees[()], {}, paths=sub_paths)
+            new_assignments = [
+                {var: (in_path + path, tree) for var, (path, tree) in new_assignment.items()}
+                for new_assignment in matches_for_quantified_formula(
+                    formula, grammar, in_inst, {}, paths=sub_paths)]
 
         new_assignments = [
             new_assignment | assignments
