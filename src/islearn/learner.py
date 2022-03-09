@@ -224,7 +224,10 @@ class InvariantLearner:
             min_precision: float = .6,
             max_disjunction_size: int = 1,
             max_conjunction_size: int = 2,
-            exclude_nonterminals: Optional[Iterable[str]] = None):
+            exclude_nonterminals: Optional[Iterable[str]] = None,
+            include_negations_in_disjunctions: bool = False,
+            perform_static_implication_check: bool = False,
+    ):
         # We add extended caching certain, crucial functions.
         isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
             inspect.unwrap(evaluate_z3_expression))
@@ -247,6 +250,8 @@ class InvariantLearner:
         self.max_disjunction_size = max_disjunction_size
         self.max_conjunction_size = max_conjunction_size
         self.exclude_nonterminals = exclude_nonterminals or set([])
+        self.perform_static_implication_check = perform_static_implication_check
+        self.include_negations_in_disjunctions = include_negations_in_disjunctions
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -320,19 +325,59 @@ class InvariantLearner:
             lazy=self.max_disjunction_size < 2,
             result_threshold=self.min_recall)
 
+        invariants = {
+            language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
+            if row.eval_result() >= self.min_recall
+        }
+
+        logger.info("%d invariants remain after filtering.", len(invariants))
+
+        if self.perform_static_implication_check:
+            # We eliminate rows in recall_truth_table whose formula is implied by that of
+            # another row with the same (higher should be impossible...) recall.
+            def check_is_implied(row: TruthTableRow) -> Optional[TruthTableRow]:
+                if any(implies(other_row.formula, row.formula, self.canonical_grammar)
+                       for other_row in recall_truth_table
+                       if (row != other_row and
+                           other_row.eval_result() >= row.eval_result() > 0)):
+                    return row
+
+                return None
+
+            with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
+                for row_to_remove in pool.uimap(check_is_implied, list(recall_truth_table.rows)):
+                    if row_to_remove is not None:
+                        recall_truth_table.rows.remove(row_to_remove)
+
+            # invariants = {
+            #     invariant_1
+            #     for idx_1, invariant_1 in enumerate(invariants)
+            #     if not any(
+            #         implies(invariant_2, invariant_1, self.canonical_grammar)
+            #         for idx_2, invariant_2 in enumerate(invariants)
+            #         if idx_1 != idx_2
+            #     )
+            # }
+
+            invariants = {
+                language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
+                if row.eval_result() >= self.min_recall
+            }
+
+            logger.info("%d invariant candidates remain after implication check.", len(invariants))
+
         if self.max_disjunction_size > 1:
             logger.info("Calculating recall of Boolean combinations.")
 
             disjunctive_precision_truthtable = copy.copy(recall_truth_table)
-            # TODO: Find a way to deal with negations that does not induce many spurious invariants.
-            #       Problem: Negation might have bad recall, that is improved by building a disjunction...
-            #       Also, in the ALHAZEN-SQRT example, this gave rise to negated invs with meaningless
-            #       constants, so we might have to control this somehow, at least with a config param.
-            negations = {
-                -row for row in recall_truth_table
-                if 1 / len(row) < row.eval_result() < 1 - 1 / len(row)
-            }
-            disjunctive_precision_truthtable |= negations
+            # TODO: Find a way to further reduce the use of negations...
+            negations = {}
+            if self.include_negations_in_disjunctions:
+                negations = {
+                    -row for row in recall_truth_table
+                    if 1 / len(row) < row.eval_result() < 1 - 1 / len(row)
+                }
+                disjunctive_precision_truthtable |= negations
 
             for level in range(2, self.max_disjunction_size + 1):
                 logger.debug(f"Disjunction size: {level}")
@@ -361,39 +406,14 @@ class InvariantLearner:
 
             recall_truth_table = disjunctive_precision_truthtable
 
-        invariants = {
-            language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
-            if row.eval_result() >= self.min_recall
-        }
+            invariants = {
+                language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
+                if row.eval_result() >= self.min_recall
+            }
 
-        logger.info("%d invariants remain after filtering.", len(invariants))
-
-        logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
-
-        def check_implication(invariant: language.Formula) -> Optional[language.Formula]:
-            if any(implies(other_inv, invariant, self.canonical_grammar)
-                   for other_inv in invariants
-                   if other_inv != invariant):
-                return None
-
-            return invariant
-
-        with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-            invariants = set(filter(None, pool.map(
-                check_implication, invariants
-            )))
-
-        # invariants = {
-        #     invariant_1
-        #     for idx_1, invariant_1 in enumerate(invariants)
-        #     if not any(
-        #         implies(invariant_2, invariant_1, self.canonical_grammar)
-        #         for idx_2, invariant_2 in enumerate(invariants)
-        #         if idx_1 != idx_2
-        #     )
-        # }
-
-        logger.info("%d invariant candidates remain after implication check.", len(invariants))
+            logger.info("%d invariants after building Boolean combinations.", len(invariants))
+            # logger.debug(
+            #   "Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
         # ne_before = len(negative_examples)
         # negative_examples.update(generate_counter_examples_from_formulas(grammar, prop, invariants))

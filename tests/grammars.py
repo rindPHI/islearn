@@ -1,6 +1,6 @@
 import string
 
-from fuzzingbook.Grammars import srange, CHARACTERS_WITHOUT_QUOTE
+from fuzzingbook.Grammars import srange, CHARACTERS_WITHOUT_QUOTE, crange
 # NOTE: To make this a PEG grammar, we need to escape single quotes within
 #       multiline literal strings. So, a multiline string with """ is the
 #       same as a multiline string with ''', just with different quotation marks.
@@ -219,6 +219,7 @@ IPv4_GRAMMAR = {
     "<zerof>": srange(string.digits + "ABCDEF")
 }
 
+# Grammar source: `https://github.com/antlr/grammars-v4/blob/master/dot/DOT.g4`
 DOT_GRAMMAR = {
     "<start>": ["<graph>"],
     "<graph>": [
@@ -308,108 +309,119 @@ DOT_GRAMMAR = {
     "<WS>": [" ", "\t", "\n"]
 }
 
-# racket_bsl_grammar = {
-# "<program>" : ["<defOrExprs>"],
-# "<defOrExpr>": ["<defOrExpr><defOrExprs>", "<defOrExpr>"],
-# "<defOrExpr>" : ["<definition>", "<expr>", "<testCase>", "<libraryRequire>"],
-#
-# "<definition>": [
-#     "(define(<name> <NAME>+) <expr>)",
-#     "(define <name> <expr>)",
-#     "(define <name> (lambda (<NAME>+) <expr>))",
-#     "(define-struct <name> (<name>*))",
-#     ],
-#
-#
-# expr: [
-#     "(<name> <expr>+)",
-#     "(<cond> \\([ <expr> <expr> ]\\)+ )",
-#     "(<cond> \\([ <expr> <expr> ]\\)* [else <expr>])",
-#     "(if <expr> <expr> <expr>)",
-#     "(and <expr> <expr>+)",
-#     "(<or> <expr> <expr>+)",
-#     "’()",
-#     "<name>",
-#     "NUMBER",
-#     "BOOLEAN",
-#     "STRING",
-#     "CHARACTER",
-#     ],
-#
-# testCase
-#     : '(' 'check-expect' expr expr ')'
-#     | '(' 'check-random' expr expr ')'
-#     | '(' 'check-within' expr expr expr ')'
-#     | '(' 'check-member-of' expr expr+ ')'
-#     | '(' 'check-satisfied' expr name ')'
-#     | '(' 'check-error' expr expr? ')'
-#     ;
-#
-# libraryRequire
-#     : '(' 'require' STRING ')'
-#     | '(' 'require' name ')'
-#     | '(' 'require' '(' name STRING ('(' STRING+ ')')? ')' ')'
-#     | '(' 'require' '(' name STRING pkg ')' ')'
-#     ;
-#
-# pkg: '(' STRING STRING NUMBER NUMBER ')'
-#    ;
-#
-# name: SYMBOL
-#     | NAME
-#     ;
-#
-# // A symbol is a quote character followed by a name. A symbol is a value, just like 42, '(), or #false.
-# SYMBOL
-#     : '’' NAME
-#     ;
-#
-# // A name or a variable is a sequence of characters not including a space or one of the following:
-# //   " , ' ` ( ) [ ] { } | ; #
-# NAME: ([$%&!*+\\^_~]|[--:<-Za-z])+
-#     ;
-#
-# // A number is a number such as 123, 3/2, or 5.5.
-# NUMBER
-#     : INT
-#     | INT '.' [0-9]* [1-9]
-#     | INT '/' INT
-#     ;
-#
-# INT: [1-9] [0-9]*
-#    | '0'
-#    ;
-#
-# BOOLEAN
-#     : '#true'
-#     | '#T'
-#     | '#t'
-#     | '#false'
-#     | '#F'
-#     | '#f'
-#     ;
-#
-# // A string is a sequence of characters enclosed by a pair of ".
-# // Unlike symbols, strings may be split into characters and manipulated by a variety of functions.
-# // For example, "abcdef", "This is a string", and "This is a string with \" inside" are all strings.
-# STRING
-#     : '"' ([ -~])* '"'
-#     ;
-#
-# // A character begins with #\ and has the name of the character.
-# // For example, #\a, #\b, and #\space are characters.
-# CHARACTER
-#     : '#' '\u005C' [A-Za-z0-9]
-#     | '#' '\u005C' 'space'
-#     ;
-#
-# LANG: '#lang' ~ ('\n' | '\r')* '\r'? '\n' -> channel (HIDDEN)
-#     ;
-#
-# COMMENT
-#    : ';' ~ ('\n' | '\r')* '\r'? '\n' -> channel (HIDDEN)
-#    ;
-#
-# WS: (' ' | '\r' | '\t' | '\u000C' | '\n') -> channel (HIDDEN)
-#   ;
-# }
+# Grammar source: `https://github.com/antlr/grammars-v4/blob/master/racket-bsl/BSL.g4`
+RACKET_BSL_GRAMMAR = {
+    "<start>": ["<program>"],
+    "<program>": ["<def_or_exprs>"],
+    "<def_or_exprs>": ["<def_or_expr><MWSS><def_or_exprs>", "<def_or_expr>"],
+    "<def_or_expr>": ["<definition>", "<expr>", "<test_case>", "<library_require>", "<COMMENT>", "<HASHDIRECTIVE>"],
+
+    "<definition>": [
+        "(<MWSS>define<MWSS>(<MWSS><name><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)",
+        "(<MWSS>define<MWSS>(<MWSS><name><MWSS>)<MWSS><expr><MWSS>)",
+        "(<MWSS>define<WSS><name><WSS><expr><MWSS>)",
+        "(<MWSS>define<WSS><name><MWSS>(lambda<MWSS>(<MWSS><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)<MWSS>)",
+        "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS><name><maybe_wss_name><MWSS>)<MWSS>)",
+        "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS>)<MWSS>)",
+    ],
+
+    "<WSS_NAMES>": ["<WSS><NAME><WSS_NAMES>", "<WSS><NAME>"],
+    "<maybe_wss_names>": ["<WSS><name><wss_names>", "<wss><name>", ""],
+
+    "<wss_exprs>": ["<WSS><expr><wss_exprs>", "<WSS><expr>"],
+
+    "<cond_args>": [
+        "[<MWSS><expr><WSS><expr><MWSS>]<MWSS><cond_args>",
+        "[<MWSS><expr><WSS><expr><MWSS>]"
+    ],
+
+    "<maybe_cond_args>": ["<cond_args>", ""],
+
+    "<expr>": [
+        "(<MWSS>cond<MWSS><maybe_cond_args><MWSS>[else<WSS><expr>]<MWSS>)",
+        "(<MWSS>cond<MWSS><cond_args><MWSS>)",
+        "(<MWSS>if<WSS><expr><WSS><expr><WSS><expr><MWSS>)",
+        "(<MWSS>and<WSS><expr><wss_exprs><MWSS>)",
+        "(<MWSS>or<WSS><expr><wss_exprs><MWSS>)",
+        "(<MWSS><name><wss_exprs><MWSS>)",
+        "’()",
+        "<STRING>",
+        "<NUMBER>",
+        "<BOOLEAN>",
+        "<CHARACTER>",
+        "<name>",
+    ],
+
+    "<test_case>": [
+        "(<MWSS>check-expect<WSS><expr><WSS><expr><MWSS>)",
+        "(<MWSS>check-random<WSS><expr><WSS><expr><MWSS>)",
+        "(<MWSS>check-within<WSS><expr><WSS><expr><WSS><expr><MWSS>)",
+        "(<MWSS>check-member-of<WSS><expr><wss_exprs><MWSS>)",
+        "(<MWSS>check-satisfied<WSS><expr><WSS><name><MWSS>)",
+        "(<MWSS>check-error<WSS><expr><WSS><expr><MWSS>)",
+        "(<MWSS>check-error<WSS><expr><MWSS>)",
+    ],
+
+    "<library_require>": [
+        "(<MWSS>require<MWSS><STRING><MWSS>)",
+        "(<MWSS>require<WSS><name><MWSS>)",
+        "(<MWSS>require<MWSS>(<MWSS><name><MWSS><STRING><MWSS>(<MWSS><strings_mwss>)<MWSS>)<MWSS>)",
+        "(<MWSS>require<MWSS>(<MWSS><name><MWSS><STRING><MWSS>)<MWSS>)",
+        "(<MWSS>require<MWSS>(<MWSS><name><MWSS><STRING><MWSS><pkg><MWSS>)<MWSS>)",
+    ],
+
+    "<strings_mwss>": ["<STRING><MWSS><strings_mwss>", "<STRING>"],
+
+    "<pkg>": ["(<MWSS><STRING><MWSS><STRING><WSS><NUMBER><WSS><NUMBER><MWSS>)"],
+
+    "<name>": ["<SYMBOL>", "<NAME>"],
+
+    # // A symbol is a quote character followed by a name. A symbol is a value, just like 42, '(), or #false.
+    "<SYMBOL>": ["'<NAME>"],
+
+    # A name or a variable is a sequence of characters not including a space or one of the following:
+    #   " , ' ` ( ) [ ] { } | ; #
+    # Original expression: ([$%&!*+\\^_~]|[--:<-Za-z])+
+    "<NAME>": ["<NAME_CHARS>"],
+    "<NAME_CHARS>": ["<NAME_CHAR><NAME_CHARS>", "<NAME_CHAR>"],
+    "<NAME_CHAR>": srange("$%&!*+\\^_~-:<>") + crange("-", ":") + crange("<", "Z") + crange("a", "z"),
+
+    # A number is a number such as 123, 3/2, or 5.5.
+    "<NUMBER>": [
+        "<INT>.<DIGITS>",
+        "<INT>/<INT>",
+        "INT",
+    ],
+
+    "<DIGITS>": ["<DIGIT><DIGITS>", "<DIGIT>"],
+    "<MAYBE_DIGITS>": ["<DIGITS>", ""],
+    "<ONENINE>": srange("123456789"),
+
+    "<INT>": ["<ONENINE><MAYBE_DIGITS>", "0"],
+
+    "<BOOLEAN>": ["#true", "#T", "#t", "#false", "#F", "#f", ],
+
+    # A string is a sequence of characters enclosed by a pair of ".
+    # Unlike symbols, strings may be split into characters and manipulated by a variety of functions.
+    # For example, "abcdef", "This is a string", and "This is a string with \" inside" are all strings.
+    "<STRING>": ['"<ESC_OR_NO_STRING_ENDINGS>"'],
+    "<ESC_OR_NO_STRING_ENDINGS>": ["<ESC_OR_NO_STRING_ENDING><ESC_OR_NO_STRING_ENDINGS>", ""],
+    "<ESC_OR_NO_STRING_ENDING>": ['\\"', "<NO_STRING_ENDING>"],
+    "<NO_STRING_ENDING>": list(set(srange(string.printable)) - set(srange('"\\'))),
+
+    # A character begins with #\ and has the name of the character.
+    # For example, #\a, #\b, and #\space are characters.
+    "<CHARACTER>": ["#\\space", "#\\<LETTERORDIGIT>"],
+
+    "<DIGIT>": srange(string.digits),
+    "<LETTERORDIGIT>": srange(string.ascii_letters + string.digits),
+
+    "<MWSS>": ["<WSS>", ""],
+    "<WSS>": ["<WS><WSS>", "<WS>"],
+    "<WS>": [" ", "\t", "\n"],
+
+    "<COMMENT>": [";<NOBRs>"],
+    "<HASHDIRECTIVE>": ["#lang <NOBRs>", "#reader<NOBRs>"],
+    "<NOBR>": list(set(string.printable) - {"\n", "\r"}),
+    "<NOBRs>": ["<NOBR><NOBRs>", "<NOBR>"],
+}

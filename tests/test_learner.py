@@ -415,7 +415,8 @@ forall <arith_expr> container_0 in start:
             activated_patterns={"Existence Numeric String Smaller Than", "String Existence"},
             # activated_patterns={"String Existence"},
             positive_examples=trees,
-            min_recall=1.0
+            min_recall=1.0,
+            # perform_static_implication_check=True
         ).learn_invariants()
 
         print(len(result))
@@ -839,7 +840,7 @@ forall <icmp_message> container in start:
                 "String Existence",
             },
             positive_examples=inputs,
-            max_disjunction_size=2
+            max_disjunction_size=2,
         ).learn_invariants()
 
         print(len(result))
@@ -928,9 +929,23 @@ forall <ip_message> container in start:
         self.assertIn(length_constraint, result.keys())
 
     def test_learn_graphviz(self):
-        # TODO: - Improve speed (38min too slow)
-        #       - Learn disjunctive inv: exists <DIGRAPH> in <graph> ==> all <edgeop> = "->"
-        #       - Add property?
+        digraph_edge_op_constraint = parse_isla("""
+        (forall <graph> container in start:
+           exists <DIGRAPH> elem in container:
+             (= elem "digraph") or
+        exists <edge_stmt> container_0 in start:
+          forall <edgeop> elem_0 in container_0:
+            (not (= elem_0 "->")))""", DOT_GRAMMAR)
+
+        graph_edge_op_constraint = parse_isla("""
+(forall <graph> container in start:
+   exists <GRAPH> elem in container:
+     (= elem "graph") or
+exists <edge_stmt> container_0 in start:
+  forall <edgeop> elem_0 in container_0:
+    (not (= elem_0 "--")))""", DOT_GRAMMAR)
+
+        # TODO: - Add property?
         # urls = [
         #     "https://raw.githubusercontent.com/ermannoGirardo/exprob_lab_assignment2/1e738dde51d0d888a8a50d22764663951399312c/ROSPlan/rosplan_dependencies/rddlsim/doc/game_of_life.dot",
         #     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
@@ -943,7 +958,7 @@ forall <ip_message> container in start:
         # trees = []
         # for url in urls:
         #     with urllib.request.urlopen(url) as f:
-        #         dot_code = (re.sub(r"//.*?\n", "", f.read().decode('utf-8'))
+        #         dot_code = (re.sub(r"(^|\n)\s*//.*?(\n|$)", "", f.read().decode('utf-8'))
         #                       .replace("\\n", "\n")
         #                       .replace("\r\n", "\n")
         #                       .strip())
@@ -988,6 +1003,7 @@ forall <ip_message> container in start:
             activated_patterns={"String Existence"},
             positive_examples=trees,
             max_disjunction_size=2,
+            include_negations_in_disjunctions=True,
             exclude_nonterminals={
                 "<WS>", "<WSS>", "<MWSS>",
                 "<A>", "<B>", "<C>", "<D>", "<E>", "<G>", "<H>", "<I>", "<N>", "<O>", "<P>", "<R>", "<S>", "<T>", "<U>",
@@ -1001,6 +1017,9 @@ forall <ip_message> container in start:
         print("\n".join(map(
             lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
             {f: p for f, p in result.items() if p > .0}.items())))
+
+        self.assertIn(digraph_edge_op_constraint, result.keys())
+        self.assertIn(graph_edge_op_constraint, result.keys())
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

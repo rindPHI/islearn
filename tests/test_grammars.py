@@ -1,12 +1,15 @@
 import random
+import re
 import string
 import unittest
+import urllib.request
 
 import scapy.all as scapy
 from fuzzingbook.Parser import PEGParser
+from isla import language
 from pythonping import icmp
 
-from grammars import ICMP_GRAMMAR, IPv4_GRAMMAR
+from grammars import ICMP_GRAMMAR, IPv4_GRAMMAR, RACKET_BSL_GRAMMAR
 from islearn.islearn_predicates import bytes_to_hex, hex_to_bytes
 
 
@@ -72,6 +75,21 @@ class TestGrammars(unittest.TestCase):
             ip_packet_hex_dump = bytes_to_hex(list(bytes(p)))
 
             self.assertTrue(PEGParser(IPv4_GRAMMAR).parse(ip_packet_hex_dump + " "))
+
+    def test_racket_bsl_grammar(self):
+        urls = [
+            "https://github.com/johnamata/compsci/raw/cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/019.rkt",
+            "https://github.com/johnamata/compsci/raw/cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/029.rkt"
+        ]
+
+        for url in urls:
+            with urllib.request.urlopen(url) as f:
+                racket_code = f.read().decode('utf-8')
+                racket_code = racket_code.replace("\\n", "\n")
+                racket_code = racket_code.replace("\r\n", "\n")
+                racket_code = racket_code.strip()
+
+                language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
 
 
 if __name__ == '__main__':
