@@ -48,7 +48,6 @@ class MutationFuzzer:
             self.generalize: 1,
         }
 
-
     def reset(self):
         self.population = set(self.seed)
         self.coverages_seen = set([])

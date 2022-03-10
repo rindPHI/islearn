@@ -36,6 +36,7 @@ from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable
 from islearn.mutation import MutationFuzzer
 from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree, tree_leaves, \
     get_subtree
+from islearn.reducer import InputReducer
 
 STANDARD_PATTERNS_REPO = "patterns.toml"
 logger = logging.getLogger("learner")
@@ -227,6 +228,9 @@ class InvariantLearner:
             exclude_nonterminals: Optional[Iterable[str]] = None,
             include_negations_in_disjunctions: bool = False,
             perform_static_implication_check: bool = False,
+            reduce_inputs_for_learning: bool = True,
+            reduce_all_inputs: bool = False,
+            generate_new_learning_samples: bool = True,
     ):
         # We add extended caching certain, crucial functions.
         isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
@@ -252,6 +256,9 @@ class InvariantLearner:
         self.exclude_nonterminals = exclude_nonterminals or set([])
         self.perform_static_implication_check = perform_static_implication_check
         self.include_negations_in_disjunctions = include_negations_in_disjunctions
+        self.reduce_inputs_for_learning = reduce_inputs_for_learning
+        self.reduce_all_inputs = reduce_all_inputs
+        self.generate_new_learning_samples = generate_new_learning_samples
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -287,16 +294,44 @@ class InvariantLearner:
             assert all(self.prop(positive_example) for positive_example in self.positive_examples)
             assert all(not self.prop(negative_example) for negative_example in self.negative_examples)
 
-        self.positive_examples_for_learning = \
-            self.sort_inputs(
-                self.positive_examples,
-                more_paths_weight=1.7,
-                smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
+        if self.reduce_all_inputs and self.prop is not None:
+            logger.info("Reducing inputs w.r.t. property and k=%d.", self.k)
+            reducer = InputReducer(self.grammar, self.prop, self.k)
+            self.positive_examples = [
+                reducer.reduce_by_smallest_subtree_replacement(inp)
+                for inp in self.positive_examples]
+
+            reducer = InputReducer(self.grammar, lambda t: not self.prop, self.k)
+            self.negative_examples = [
+                reducer.reduce_by_smallest_subtree_replacement(inp)
+                for inp in self.negative_examples]
+
+        if self.generate_new_learning_samples or not self.original_positive_examples:
+            self.positive_examples_for_learning = \
+                self.sort_inputs(
+                    self.positive_examples,
+                    more_paths_weight=1.7,
+                    smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
+        else:
+            self.positive_examples_for_learning = \
+                self.sort_inputs(
+                    self.original_positive_examples,
+                    more_paths_weight=1.7,
+                    smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
 
         logger.info(
             "Keeping %d positive examples for candidate generation.",
             len(self.positive_examples_for_learning)
         )
+
+        if ((not self.reduce_all_inputs or not self.generate_new_learning_samples)
+                and self.reduce_inputs_for_learning
+                and self.prop is not None):
+            logger.info("Reducing inputs for learning w.r.t. property and k=%d.", self.k)
+            reducer = InputReducer(self.grammar, self.prop, self.k)
+            self.positive_examples_for_learning = [
+                reducer.reduce_by_smallest_subtree_replacement(inp)
+                for inp in self.positive_examples_for_learning]
 
         logger.debug(
             "Examples for learning:\n%s",
@@ -330,7 +365,12 @@ class InvariantLearner:
             if row.eval_result() >= self.min_recall
         }
 
-        logger.info("%d invariants remain after filtering.", len(invariants))
+        logger.info(
+            "%d invariants with recall >= %d%% remain after filtering.",
+            len(invariants),
+            int(self.min_recall * 100))
+
+        # logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
         if self.perform_static_implication_check:
             # We eliminate rows in recall_truth_table whose formula is implied by that of
@@ -364,7 +404,10 @@ class InvariantLearner:
                 if row.eval_result() >= self.min_recall
             }
 
-            logger.info("%d invariant candidates remain after implication check.", len(invariants))
+            logger.info(
+                "%d invariant candidates with recall >= %d%% remain after implication check.",
+                len(invariants),
+                int(self.min_recall * 100))
 
         if self.max_disjunction_size > 1:
             logger.info("Calculating recall of Boolean combinations.")
@@ -375,7 +418,11 @@ class InvariantLearner:
             if self.include_negations_in_disjunctions:
                 negations = {
                     -row for row in recall_truth_table
-                    if 1 / len(row) < row.eval_result() < 1 - 1 / len(row)
+                    # To ensure that only "meaningful" properties are negated,
+                    # the un-negated properties should hold for at least 20%
+                    # of all inputs; but at most for 80%, since otherwise, the
+                    # negation is overly specific.
+                    if .2 < row.eval_result() < .8
                 }
                 disjunctive_precision_truthtable |= negations
 
@@ -399,7 +446,8 @@ class InvariantLearner:
 
                     disjunction = functools.reduce(TruthTableRow.__or__, rows)
                     new_eval_result = disjunction.eval_result()
-                    if not all(new_eval_result > row.eval_result() for row in rows):
+                    if (new_eval_result < self.min_recall or
+                            not all(new_eval_result > row.eval_result() for row in rows)):
                         continue
 
                     disjunctive_precision_truthtable.rows.add(disjunction)
@@ -427,14 +475,14 @@ class InvariantLearner:
             return {inv: 1.0 for inv in invariants}
 
         logger.info("Evaluating precision.")
-        # logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
+        logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
 
         precision_truth_table = TruthTable([
             TruthTableRow(inv, self.negative_examples)
             for inv in invariants
         ]).evaluate(
             self.grammar,
-            # rows_parallel=True,
+            rows_parallel=True,
         )
 
         logger.info("Calculating precision of Boolean combinations.")
@@ -451,7 +499,8 @@ class InvariantLearner:
 
                 disjunction = functools.reduce(TruthTableRow.__and__, rows)
                 new_eval_result = disjunction.eval_result()
-                if not all(new_eval_result < row.eval_result() for row in rows):
+                if (new_eval_result < self.min_precision or
+                        not all(new_eval_result < row.eval_result() for row in rows)):
                     continue
 
                 conjunctive_precision_truthtable.rows.add(disjunction)
@@ -464,7 +513,11 @@ class InvariantLearner:
             if 1 - row.eval_result() >= self.min_precision
         }
 
-        logger.info("Found %d invariants with non-zero precision.", len([p for p in result.values() if p > 0]))
+        logger.info(
+            "Found %d invariants with precision >= %d%%.",
+            len([p for p in result.values() if p > self.min_precision]),
+            int(self.min_precision * 100)
+        )
 
         return dict(
             cast(List[Tuple[language.Formula, float]],
@@ -648,10 +701,6 @@ class InvariantLearner:
                 len(self.negative_examples) - ne_before
             )
 
-        # logger.debug(
-        #     "Positive examples:\n%s",
-        #     "\n".join(map(str, self.positive_examples)))
-
         assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
         pe_before = len(self.positive_examples)
         ne_before = len(self.negative_examples)
@@ -661,10 +710,6 @@ class InvariantLearner:
                 self.positive_examples.append(inp)
             elif not self.prop(inp) and not tree_in(inp, self.negative_examples):
                 self.negative_examples.append(inp)
-
-        # logger.debug(
-        #     "Positive examples:\n%s",
-        #     "\n".join(map(str, self.positive_examples)))
 
         logger.info(
             "Generated %d additional positive, and %d additional negative samples (by mutation fuzzing).",
@@ -768,7 +813,13 @@ class InvariantLearner:
         inputs = set(inputs)
         result: List[language.DerivationTree] = []
 
-        tree_paths = {inp: self.graph.k_paths_in_tree(inp.to_parse_tree(), self.k) for inp in inputs}
+        tree_paths = {
+            inp: {
+                path for path in self.graph.k_paths_in_tree(inp.to_parse_tree(), self.k)
+                if (not isinstance(path[-1], gg.TerminalNode) or
+                    (not isinstance(path[-1], gg.TerminalNode) and len(path[-1].symbol) > 1))
+            } for inp in inputs}
+
         covered_paths: Set[Tuple[gg.Node, ...]] = set([])
         max_len_input = max(len(inp) for inp in inputs)
 
@@ -795,9 +846,14 @@ class InvariantLearner:
 
         while inputs:
             inp = sorted(inputs, key=key, reverse=True)[0]
-
-            result.append(inp)
             inputs.remove(inp)
+            uncovered = uncovered_paths(inp)
+
+            if not uncovered:
+                continue
+
+            covered_paths.update(uncovered)
+            result.append(inp)
 
         return result
 

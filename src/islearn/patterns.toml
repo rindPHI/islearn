@@ -169,7 +169,6 @@ forall <?NONTERMINAL> container in start:
     (= elem <?STRING>)
 '''
 
-
 [[Existential]]
 
 name = "Positioned String Existence (CSV)"

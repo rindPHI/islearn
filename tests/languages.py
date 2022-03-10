@@ -1,9 +1,17 @@
+import logging
+import os
 import string
+import subprocess
+import sys
+import tempfile
+from subprocess import PIPE
 
+import graphviz
 from fuzzingbook.Grammars import srange, CHARACTERS_WITHOUT_QUOTE, crange
 # NOTE: To make this a PEG grammar, we need to escape single quotes within
 #       multiline literal strings. So, a multiline string with """ is the
 #       same as a multiline string with ''', just with different quotation marks.
+from isla import language
 from isla.type_defs import Grammar
 
 toml_grammar = {
@@ -220,6 +228,9 @@ IPv4_GRAMMAR = {
 }
 
 # Grammar source: `https://github.com/antlr/grammars-v4/blob/master/dot/DOT.g4`
+# We changed the DIGRAPH, GRAPH, NODE, EDGE, SUBGRAPH, and STRICT identifiers to be case sensitive
+# (lower case) to enable learning String equations. In all GitHub examples we found /
+# use, this is anyway the case.
 DOT_GRAMMAR = {
     "<start>": ["<graph>"],
     "<graph>": [
@@ -259,12 +270,12 @@ DOT_GRAMMAR = {
     "<maybe_space_id>": ["<WSS><id>", ""],
     "<id>": ["<STRING>", "<ID>", "<NUMBER>"],
     "<maybe_strict>": ["<STRICT><WSS>", ""],
-    "<STRICT>": ["<S><T><R><I><C><T>"],
-    "<GRAPH>": ["<G><R><A><P><H>"],
-    "<DIGRAPH>": ["<D><I><G><R><A><P><H>"],
-    "<NODE>": ["<N><O><D><E>"],
-    "<EDGE>": ["<E><D><G><E>"],
-    "<SUBGRAPH>": ["<S><U><B><G><R><A><P><H>"],
+    "<STRICT>": ["strict"],  # ["<S><T><R><I><C><T>"],
+    "<GRAPH>": ["graph"],  # ["<G><R><A><P><H>"],
+    "<DIGRAPH>": ["digraph"],  # ["<D><I><G><R><A><P><H>"],
+    "<NODE>": ["node"],  # ["<N><O><D><E>"],
+    "<EDGE>": ["edge"],  # ["<E><D><G><E>"],
+    "<SUBGRAPH>": ["subgraph"],  # ["<S><U><B><G><R><A><P><H>"],
     "<NUMBER>": [
         "<maybe_minus><DIGITS>.<MAYBE_DIGITS>",
         "<maybe_minus><DIGITS>",
@@ -289,21 +300,21 @@ DOT_GRAMMAR = {
     "<maybe_minus>": ["-", ""],
     "<maybe_comma>": [",", ""],
     "<maybe_semi>": [";", ""],
-    "<A>": ["A", "a"],
-    "<B>": ["B", "b"],
-    "<C>": ["C", "c"],
-    "<D>": ["D", "d"],
-    "<E>": ["E", "e"],
-    "<G>": ["G", "g"],
-    "<H>": ["H", "h"],
-    "<I>": ["I", "i"],
-    "<N>": ["N", "n"],
-    "<O>": ["O", "o"],
-    "<P>": ["P", "p"],
-    "<R>": ["R", "r"],
-    "<S>": ["S", "s"],
-    "<T>": ["T", "t"],
-    "<U>": ["U", "u"],
+    # "<A>": ["A", "a"],
+    # "<B>": ["B", "b"],
+    # "<C>": ["C", "c"],
+    # "<D>": ["D", "d"],
+    # "<E>": ["E", "e"],
+    # "<G>": ["G", "g"],
+    # "<H>": ["H", "h"],
+    # "<I>": ["I", "i"],
+    # "<N>": ["N", "n"],
+    # "<O>": ["O", "o"],
+    # "<P>": ["P", "p"],
+    # "<R>": ["R", "r"],
+    # "<S>": ["S", "s"],
+    # "<T>": ["T", "t"],
+    # "<U>": ["U", "u"],
     "<MWSS>": ["<WSS>", ""],
     "<WSS>": ["<WS><WSS>", "<WS>"],
     "<WS>": [" ", "\t", "\n"]
@@ -426,3 +437,22 @@ RACKET_BSL_GRAMMAR = {
     "<NOBR>": list(set(string.printable) - {"\n", "\r"}),
     "<NOBRs>": ["<NOBR><NOBRs>", "<NOBR>"],
 }
+
+
+def render_dot(tree: language.DerivationTree) -> bool | str:
+    logging.getLogger("graphviz.backend").propagate = False
+    logging.getLogger("graphviz.files").propagate = False
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as outfile:
+        devnull = open(os.devnull, 'w')
+        orig_stderr = sys.stderr
+        sys.stderr = devnull
+
+        err_message = ""
+        try:
+            graphviz.Source(str(tree)).render(outfile.name)
+        except Exception as exc:
+            err_message = str(exc)
+
+        sys.stderr = orig_stderr
+        return True if not err_message else err_message

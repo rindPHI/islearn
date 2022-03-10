@@ -22,7 +22,7 @@ from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
 
-from grammars import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR
+from languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES
 from islearn.learner import patterns_from_file, InvariantLearner, \
@@ -930,29 +930,27 @@ forall <ip_message> container in start:
 
     def test_learn_graphviz(self):
         digraph_edge_op_constraint = parse_isla("""
-        (forall <graph> container in start:
-           exists <DIGRAPH> elem in container:
-             (= elem "digraph") or
-        exists <edge_stmt> container_0 in start:
-          forall <edgeop> elem_0 in container_0:
-            (not (= elem_0 "->")))""", DOT_GRAMMAR)
+(forall <graph> container in start:
+   exists <DIGRAPH> elem in container:
+     (= elem "digraph") and
+forall <graph> container_0 in start:
+  exists <edgeop> elem_0 in container_0:
+    (= elem_0 "->"))""", DOT_GRAMMAR)
 
         graph_edge_op_constraint = parse_isla("""
 (forall <graph> container in start:
    exists <GRAPH> elem in container:
-     (= elem "graph") or
-exists <edge_stmt> container_0 in start:
-  forall <edgeop> elem_0 in container_0:
-    (not (= elem_0 "--")))""", DOT_GRAMMAR)
+     (= elem "graph") and
+forall <graph> container_0 in start:
+  exists <edgeop> elem_0 in container_0:
+    (= elem_0 "--"))""", DOT_GRAMMAR)
 
-        # TODO: - Add property?
         # urls = [
-        #     "https://raw.githubusercontent.com/ermannoGirardo/exprob_lab_assignment2/1e738dde51d0d888a8a50d22764663951399312c/ROSPlan/rosplan_dependencies/rddlsim/doc/game_of_life.dot",
         #     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
         #     "https://raw.githubusercontent.com/hisenyiu2015/android_kernel_realme_sm8150/d5f2e1cc211fa7e0b3bed87a836d562ceb181878/Documentation/media/uapi/v4l/pipeline.dot",
         #     "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
         #     # Below one is graph, not digraph
-        #     "https://github.com/nathanaelle/wireguard-topology/blob/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
+        #     "https://raw.githubusercontent.com/nathanaelle/wireguard-topology/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
         # ]
         #
         # trees = []
@@ -982,7 +980,6 @@ exists <edge_stmt> container_0 in start:
         #     positive_examples=trees,
         #     exclude_nonterminals={
         #         "<WS>", "<WSS>", "<MWSS>",
-        #         "<A>", "<B>", "<C>", "<D>", "<E>", "<G>", "<H>", "<I>", "<N>", "<O>", "<P>", "<R>", "<S>", "<T>", "<U>",
         #         "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
         #         "<LETTER>", "<maybe_minus>", "<maybe_comma>", "<maybe_semi>"
         #     }
@@ -997,16 +994,27 @@ exists <edge_stmt> container_0 in start:
         # return
         ##############
 
+        def prop(tree: language.DerivationTree) -> bool:
+            return render_dot(tree) is True
+
         result = InvariantLearner(
             DOT_GRAMMAR,
-            prop=None,
+            prop=prop,
             activated_patterns={"String Existence"},
             positive_examples=trees,
+            target_number_positive_samples_for_learning=6,
+            target_number_negative_samples=9,
             max_disjunction_size=2,
             include_negations_in_disjunctions=True,
+            max_conjunction_size=2,
+            min_recall=.3,
+            min_precision=.4,
+            reduce_all_inputs=True,
+            generate_new_learning_samples=False,
+            # reduce_inputs_for_learning=True,
+            # perform_static_implication_check=True,
             exclude_nonterminals={
                 "<WS>", "<WSS>", "<MWSS>",
-                "<A>", "<B>", "<C>", "<D>", "<E>", "<G>", "<H>", "<I>", "<N>", "<O>", "<P>", "<R>", "<S>", "<T>", "<U>",
                 "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
                 "<LETTER>", "<maybe_minus>", "<maybe_comma>", "<maybe_semi>"
             }

@@ -244,18 +244,5 @@ def tree_in(tree: isla.language.DerivationTree, iterable: Iterable[isla.language
     return any(tree.structurally_equal(t) for t in iterable)
 
 
-class BinaryDerivationTreeNode:
-    def __init__(
-            self,
-            value: str,
-            orig_path: Path,
-            left: Optional['BinaryDerivationTreeNode'],
-            right: Optional['BinaryDerivationTreeNode']):
-        self.value = value
-        self.orig_path = orig_path
-        self.left = left
-        self.right = right
-
-
 def remove_spaces(inp: str) -> str:
     return re.sub(r"\s+", "", str(inp))
