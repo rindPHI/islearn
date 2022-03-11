@@ -8,7 +8,7 @@ import pkgutil
 import re
 from abc import ABC
 from functools import lru_cache
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence, AbstractSet
 
 import isla.fuzzer
 import toml
@@ -93,7 +93,6 @@ class TruthTableRow:
 
         return self
 
-    @lru_cache(maxsize=None)
     def eval_result(self) -> float:
         assert len(self.inputs) > 0
         assert len(self.eval_results) == len(self.inputs)
@@ -247,6 +246,7 @@ class InvariantLearner:
             reduce_all_inputs: bool = False,
             generate_new_learning_samples: bool = True,
             do_generate_more_inputs: bool = True,
+            filter_inputs_for_learning_by_kpaths: bool = True,
     ):
         # We add extended caching certain, crucial functions.
         isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
@@ -276,6 +276,7 @@ class InvariantLearner:
         self.reduce_all_inputs = reduce_all_inputs
         self.generate_new_learning_samples = generate_new_learning_samples
         self.do_generate_more_inputs = do_generate_more_inputs
+        self.filter_inputs_for_learning_by_kpaths = filter_inputs_for_learning_by_kpaths
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -453,15 +454,17 @@ class InvariantLearner:
             logger.info("Calculating recall of Boolean combinations.")
 
             disjunctive_recall_truthtable = copy.deepcopy(recall_truth_table)
-            assert len(disjunctive_recall_truthtable) == len(precision_truth_table)
+            assert precision_truth_table is None or len(disjunctive_recall_truthtable) == len(precision_truth_table)
 
             for level in range(2, self.max_disjunction_size + 1):
-                assert len(disjunctive_recall_truthtable) == len(precision_truth_table)
+                assert precision_truth_table is None or len(disjunctive_recall_truthtable) == len(precision_truth_table)
                 logger.debug(f"Disjunction size: {level}")
 
                 for rows_with_indices in itertools.combinations(enumerate(recall_truth_table), level):
-                    assert len(disjunctive_recall_truthtable) == len(precision_truth_table)
-                    assert all(rwi[1].formula == precision_truth_table[rwi[0]].formula for rwi in rows_with_indices)
+                    assert (precision_truth_table is None or
+                            len(disjunctive_recall_truthtable) == len(precision_truth_table))
+                    assert (precision_truth_table is None or
+                            all(rwi[1].formula == precision_truth_table[rwi[0]].formula for rwi in rows_with_indices))
 
                     max_num_negations = level // 2 if self.include_negations_in_disjunctions else 0
                     for formulas_to_negate in (
@@ -512,13 +515,6 @@ class InvariantLearner:
             # logger.debug(
             #   "Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
-        # ne_before = len(negative_examples)
-        # negative_examples.update(generate_counter_examples_from_formulas(grammar, prop, invariants))
-        # logger.info(
-        #     "Generated %d additional negative samples (from invariants).",
-        #     len(negative_examples) - ne_before
-        # )
-
         if not self.negative_examples:
             if ensure_unique_var_names:
                 invariants = sorted(list(map(ensure_unique_bound_variables, invariants)), key=lambda inv: len(inv))
@@ -526,30 +522,12 @@ class InvariantLearner:
                 invariants = sorted(list(invariants), key=lambda inv: len(inv))
             return {inv: 1.0 for inv in invariants}
 
-        # precision_truth_table = TruthTable([
-        #     TruthTableRow(inv, self.negative_examples)
-        #     for inv in invariants
-        # ]).evaluate(
-        #     self.grammar,
-        #     rows_parallel=True,
-        # )
-
         logger.info("Calculating precision of Boolean combinations.")
         conjunctive_precision_truthtable = copy.copy(precision_truth_table)
         for level in range(2, self.max_conjunction_size + 1):
             logger.debug(f"Conjunction size: {level}")
             for rows_with_indices in itertools.combinations(enumerate(precision_truth_table), level):
-                assert len(recall_truth_table) == len(precision_truth_table)
-                assert all(rwi[1].formula == recall_truth_table[rwi[0]].formula for rwi in rows_with_indices)
-
                 precision_table_rows = [row for (_, row) in rows_with_indices]
-
-                # TODO Remove
-                # if (any('"--"' in str(row.formula) for row in precision_table_rows)
-                #         and any('"graph"' in str(row.formula) for row in precision_table_rows)
-                #         and any('"->"' in str(row.formula) for row in precision_table_rows)
-                #         and any('"digraph"' in str(row.formula) for row in precision_table_rows)):
-                #     print()
 
                 # Only consider combinations where all rows meet minimum recall requirement.
                 # Recall doesn't get better by forming conjunctions!
@@ -920,7 +898,7 @@ class InvariantLearner:
             inputs.remove(inp)
             uncovered = uncovered_paths(inp)
 
-            if not uncovered:
+            if self.filter_inputs_for_learning_by_kpaths and not uncovered:
                 continue
 
             covered_paths.update(uncovered)

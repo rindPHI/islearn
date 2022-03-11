@@ -45,14 +45,23 @@ forall <expr> use_ctx in start:
         def prop(tree: language.DerivationTree) -> bool:
             return scriptsizec.compile_scriptsizec_clang(tree) is True
 
-        raw_inputs = [
+        good_programs = [
             "{int c;c < 0;}",
             "{17 < 0;}",
         ]
-        inputs = [
+        good_inputs = [
             language.DerivationTree.from_parse_tree(
                 next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
-            for inp in raw_inputs]
+            for inp in good_programs]
+
+        # bad_programs = [
+        #     "{int c;d < 0;}",
+        #     "{17 < 0;x = y + 1;}",
+        # ]
+        # bad_inputs = [
+        #     language.DerivationTree.from_parse_tree(
+        #         next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse(inp)))
+        #     for inp in bad_programs]
 
         #########
         # candidates = InvariantLearner(
@@ -62,10 +71,14 @@ forall <expr> use_ctx in start:
         #     positive_examples=inputs
         # ).generate_candidates(
         #     patterns_from_file()["Def-Use (C)"],
-        #     inputs)
+        #     good_inputs)
         #
         # print(len(candidates))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # self.assertIn(
+        #     correct_property.strip(),
+        #     map(lambda f: ISLaUnparser(f).unparse(), candidates))
         #
         # return
         ##########
@@ -74,9 +87,10 @@ forall <expr> use_ctx in start:
             scriptsizec.SCRIPTSIZE_C_GRAMMAR,
             prop,
             activated_patterns={"Def-Use (C)"},
-            positive_examples=inputs,
+            positive_examples=good_inputs,
             target_number_positive_samples=7,
-            target_number_positive_samples_for_learning=4
+            target_number_positive_samples_for_learning=4,
+            max_conjunction_size=1,
         ).learn_invariants()
 
         # print(len(result))
@@ -247,7 +261,7 @@ exists int num:
         def prop(tree: language.DerivationTree) -> bool:
             return evaluate(correct_property, tree, csv.CSV_GRAMMAR).is_true()
 
-        ##################
+        #################
         # inputs = list(map(
         #     lambda inp: language.DerivationTree.from_parse_tree(next(EarleyParser(csv.CSV_GRAMMAR).parse(inp))),
         #     ["a;b;c\n", "a;b\nc;d\n"]))
@@ -260,6 +274,9 @@ exists int num:
         #
         # print(len(result))
         # print("\n".join(map(lambda f: ISLaUnparser(f).unparse(), result)))
+        #
+        # self.assertIn(correct_property.strip(), [ISLaUnparser(f).unparse() for f in result])
+        #
         # return
         ##################
 
@@ -277,7 +294,7 @@ exists int num:
             result)
 
         perfect_precision_formulas = [f for f, p in result.items() if p == 1]
-        self.assertEqual(2, len(perfect_precision_formulas))
+        # self.assertEqual(2, len(perfect_precision_formulas))
         self.assertIn(correct_property.strip(), [ISLaUnparser(f).unparse() for f in perfect_precision_formulas])
 
     @pytest.mark.flaky(reruns=3, reruns_delay=2)
@@ -434,6 +451,20 @@ forall <arith_expr> container_0 in start:
         self.assertTrue(any(re.match(correct_property_2_re, r) for r in nonzero_precision_results))
 
     def test_learn_from_islearn_patterns_file(self):
+        correct_property_1 = """
+forall <document> container in start:
+  exists <key> elem in container:
+    (= elem "name")"""
+
+        correct_property_2 = """
+forall <document> container in start:
+  exists <key> elem in container:
+    (= elem "constraint")"""
+
+        correct_property_3 = """
+forall <key> elem in start:
+  (>= (str.len elem) (str.to.int "4"))"""
+
         # islearn_repo_content = pkgutil.get_data("islearn", STANDARD_PATTERNS_REPO).decode("UTF-8").strip()
 
         repo = patterns_from_file()
@@ -456,12 +487,17 @@ forall <arith_expr> container_0 in start:
         #     None,
         #     positive_examples=trees
         # ).generate_candidates(
-        #     repo["String Existence"],  # repo["Universal"], # repo["Existence Strings Relative Order"]
+        #     repo["String Existence"] | repo["Universal"],  # repo["Existence Strings Relative Order"]
         #     trees
         # )
         #
         # print(len(candidates))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # self.assertIn(correct_property_1.strip(), [ISLaUnparser(c).unparse() for c in candidates])
+        # self.assertIn(correct_property_2.strip(), [ISLaUnparser(c).unparse() for c in candidates])
+        # self.assertIn(correct_property_3.strip(), [ISLaUnparser(c).unparse() for c in candidates])
+        # self.assertIn(correct_property_4.strip(), [ISLaUnparser(c).unparse() for c in candidates])
         #
         # return
         ##############
@@ -470,7 +506,8 @@ forall <arith_expr> container_0 in start:
             toml_grammar,
             prop=None,
             activated_patterns={"String Existence", "Universal"},
-            positive_examples=trees
+            positive_examples=trees,
+            reduce_all_inputs=True,
         ).learn_invariants()
 
         print(len(result))
@@ -483,28 +520,9 @@ forall <arith_expr> container_0 in start:
             lambda f: ISLaUnparser(f).unparse(),
             [r for r, p in result.items() if p > .0]))
 
-        correct_property_1 = """
-forall <document> container in start:
-  exists <key> elem in container:
-    (= elem "name")"""
-
-        correct_property_2 = """
-forall <document> container in start:
-  exists <key> elem in container:
-    (= elem "constraint")"""
-
-        correct_property_3 = """
-forall <key> elem in start:
-  (>= (str.len elem) (str.to.int "4"))"""
-
-        correct_property_4 = """
-forall <key> elem in start:
-  (<= (str.len elem) (str.to.int "11"))"""
-
         self.assertIn(correct_property_1.strip(), nonzero_precision_results)
         self.assertIn(correct_property_2.strip(), nonzero_precision_results)
         self.assertIn(correct_property_3.strip(), nonzero_precision_results)
-        self.assertIn(correct_property_4.strip(), nonzero_precision_results)
 
     def test_str_len_ph_instantiation(self):
         repo = patterns_from_file()
@@ -807,10 +825,10 @@ forall <icmp_message> container in start:
         type_constraint = parse_abstract_isla("""
 (forall <icmp_message> container in start:
    exists <type> elem in container:
-     (= elem "08 ") or
+     (= elem "00 ") or
 forall <icmp_message> container_0 in start:
   exists <type> elem_0 in container_0:
-    (= elem_0 "00 "))""", ICMP_GRAMMAR)
+    (= elem_0 "08 ")))""", ICMP_GRAMMAR)
 
         code_constraint = parse_abstract_isla("""
 forall <icmp_message> container in start:
@@ -840,11 +858,12 @@ forall <icmp_message> container in start:
             prop=None,
             activated_patterns={
                 "Checksums",
-                # "Positioned String Existence (CSV)",
                 "String Existence",
             },
             positive_examples=inputs,
             max_disjunction_size=2,
+            filter_inputs_for_learning_by_kpaths=False,
+            min_recall=1
         ).learn_invariants()
 
         print(len(result))
@@ -853,8 +872,10 @@ forall <icmp_message> container in start:
             {f: p for f, p in result.items() if p > .0}.items())))
 
         self.assertIn(expected_checksum_constraint, result.keys())
-        self.assertIn(type_constraint, result.keys())
         self.assertIn(code_constraint, result.keys())
+        self.assertTrue(any(
+            implies(rf, type_constraint, ICMP_GRAMMAR) and
+            implies(type_constraint, rf, ICMP_GRAMMAR) for rf in result.keys()))
 
     def test_ip_icmp_ping_request(self):
         ip_header_constraint = parse_abstract_isla("""
@@ -917,7 +938,9 @@ forall <ip_message> container in start:
                 "Positioned String Existence (CSV)",
                 "Existence Length Field (Hex)",
             },
-            positive_examples=inputs
+            positive_examples=inputs,
+            filter_inputs_for_learning_by_kpaths=False,
+            min_recall=1.0,
         ).learn_invariants()
 
         # print(len(result))
