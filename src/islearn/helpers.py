@@ -246,3 +246,11 @@ def tree_in(tree: isla.language.DerivationTree, iterable: Iterable[isla.language
 
 def remove_spaces(inp: str) -> str:
     return re.sub(r"\s+", "", str(inp))
+
+
+def try_except(success: Callable[[], T], failure: Callable[[], T] | T, *exceptions) -> S | T:
+    # See https://stackoverflow.com/questions/7088009/python-try-except-as-an-expression
+    try:
+        return success()
+    except exceptions or Exception:
+        return failure() if callable(failure) else failure

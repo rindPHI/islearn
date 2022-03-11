@@ -20,7 +20,7 @@ from isla.evaluator import evaluate, matches_for_quantified_formula, implies
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
     is_nonterminal, dict_of_lists_to_list_of_dicts
 from isla.isla_predicates import reachable, is_before
-from isla.language import set_smt_auto_eval, ISLaUnparser
+from isla.language import set_smt_auto_eval, ensure_unique_bound_variables
 from isla.solver import ISLaSolver
 from isla.three_valued_truth import ThreeValuedTruth
 from isla.type_defs import Grammar, ParseTree, Path
@@ -93,6 +93,7 @@ class TruthTableRow:
 
         return self
 
+    @lru_cache(maxsize=None)
     def eval_result(self) -> float:
         assert len(self.inputs) > 0
         assert len(self.eval_results) == len(self.inputs)
@@ -143,40 +144,54 @@ class TruthTableRow:
 
 class TruthTable:
     def __init__(self, rows: Iterable[TruthTableRow] = ()):
-        self.rows = set(rows)
+        self.__row_hashes = set([])
+        self.__rows = []
+        for row in rows:
+            row_hash = hash(row)
+            if row_hash not in self.__row_hashes:
+                self.__row_hashes.add(row_hash)
+                self.__rows.append(row)
 
     def __repr__(self):
-        return f"TruthTable({repr(self.rows)})"
+        return f"TruthTable({repr(self.__rows)})"
 
     def __str__(self):
-        return "\n".join(map(str, self.rows))
+        return "\n".join(map(str, self.__rows))
 
     def __getitem__(self, item: int | language.Formula) -> TruthTableRow:
         if isinstance(item, int):
-            return list(self.rows)[item]
+            return self.__rows[item]
 
         assert isinstance(item, language.Formula)
 
         try:
-            return next(row for row in self.rows if row.formula == item)
+            return next(row for row in self.__rows if row.formula == item)
         except StopIteration:
             raise KeyError(item)
 
+    def __len__(self):
+        return len(self.__rows)
+
     def __iter__(self):
-        return iter(self.rows)
+        return iter(self.__rows)
+
+    def append(self, row: TruthTableRow):
+        row_hash = hash(row)
+        if row_hash not in self.__row_hashes:
+            self.__row_hashes.add(row_hash)
+            self.__rows.append(row)
+
+    def remove(self, row: TruthTableRow):
+        self.__rows.remove(row)
+        self.__row_hashes.remove(hash(row))
 
     def __add__(self, other: 'TruthTable') -> 'TruthTable':
-        return TruthTable(self.rows | other.rows)
+        return TruthTable(self.__rows + other.__rows)
 
     def __iadd__(self, other: 'TruthTable') -> 'TruthTable':
-        self.rows |= other.rows
-        return self
+        for row in other.__rows:
+            self.append(row)
 
-    def __or__(self, other: Iterable[TruthTableRow]) -> 'TruthTable':
-        return TruthTable(self.rows | set(other))
-
-    def __ior__(self, other: Iterable[TruthTableRow]) -> 'TruthTable':
-        self.rows |= set(other)
         return self
 
     def evaluate(
@@ -194,12 +209,12 @@ class TruthTable:
 
         if rows_parallel:
             with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-                self.rows = set(pool.map(
+                self.__rows = set(pool.map(
                     lambda row: row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold),
-                    self.rows
+                    self.__rows
                 ))
         else:
-            for row in self.rows:
+            for row in self.__rows:
                 row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold)
 
         return self
@@ -231,6 +246,7 @@ class InvariantLearner:
             reduce_inputs_for_learning: bool = True,
             reduce_all_inputs: bool = False,
             generate_new_learning_samples: bool = True,
+            do_generate_more_inputs: bool = True,
     ):
         # We add extended caching certain, crucial functions.
         isla.helpers.evaluate_z3_expression = lru_cache(maxsize=None)(
@@ -259,6 +275,7 @@ class InvariantLearner:
         self.reduce_inputs_for_learning = reduce_inputs_for_learning
         self.reduce_all_inputs = reduce_all_inputs
         self.generate_new_learning_samples = generate_new_learning_samples
+        self.do_generate_more_inputs = do_generate_more_inputs
 
         self.positive_examples: List[language.DerivationTree] = list(set(positive_examples or []))
         self.original_positive_examples: List[language.DerivationTree] = list(self.positive_examples)
@@ -287,8 +304,8 @@ class InvariantLearner:
                 else parse_abstract_isla(pattern, grammar)
                 for pattern in patterns]
 
-    def learn_invariants(self) -> Dict[language.Formula, float]:
-        if self.prop:
+    def learn_invariants(self, ensure_unique_var_names: bool = True) -> Dict[language.Formula, float]:
+        if self.prop and self.do_generate_more_inputs:
             self._generate_more_inputs()
             assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
             assert all(self.prop(positive_example) for positive_example in self.positive_examples)
@@ -357,11 +374,31 @@ class InvariantLearner:
         ]).evaluate(
             self.grammar,
             # rows_parallel=True,
-            lazy=self.max_disjunction_size < 2,
-            result_threshold=self.min_recall)
+            # TODO: Check if lazy is needed, removed for now.
+            #       Remove from TruthTable if not needed.
+            # lazy=self.max_disjunction_size < 2,
+            # result_threshold=self.min_recall
+        )
+
+        precision_truth_table = None
+        if self.negative_examples:
+            logger.info("Evaluating precision.")
+            logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
+
+            precision_truth_table = TruthTable([
+                TruthTableRow(inv, self.negative_examples)
+                for inv in candidates
+            ]).evaluate(
+                self.grammar,
+                # rows_parallel=True
+            )
+
+            assert len(precision_truth_table) == len(recall_truth_table)
+
+        assert not self.negative_examples or precision_truth_table is not None
 
         invariants = {
-            language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
+            row.formula for row in recall_truth_table
             if row.eval_result() >= self.min_recall
         }
 
@@ -385,9 +422,12 @@ class InvariantLearner:
                 return None
 
             with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-                for row_to_remove in pool.uimap(check_is_implied, list(recall_truth_table.rows)):
+                for row_to_remove in pool.uimap(check_is_implied, list(recall_truth_table)):
+                    row_to_remove: TruthTableRow
                     if row_to_remove is not None:
-                        recall_truth_table.rows.remove(row_to_remove)
+                        recall_truth_table.remove(row_to_remove)
+                        if precision_truth_table is not None:
+                            precision_truth_table.remove(precision_truth_table[row_to_remove.formula])
 
             # invariants = {
             #     invariant_1
@@ -400,7 +440,7 @@ class InvariantLearner:
             # }
 
             invariants = {
-                language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
+                row.formula for row in recall_truth_table
                 if row.eval_result() >= self.min_recall
             }
 
@@ -412,54 +452,63 @@ class InvariantLearner:
         if self.max_disjunction_size > 1:
             logger.info("Calculating recall of Boolean combinations.")
 
-            disjunctive_precision_truthtable = copy.copy(recall_truth_table)
-            # TODO: Find a way to further reduce the use of negations...
-            negations = {}
-            if self.include_negations_in_disjunctions:
-                negations = {
-                    -row for row in recall_truth_table
-                    # To ensure that only "meaningful" properties are negated,
-                    # the un-negated properties should hold for at least 20%
-                    # of all inputs; but at most for 80%, since otherwise, the
-                    # negation is overly specific.
-                    if .2 < row.eval_result() < .8
-                }
-                disjunctive_precision_truthtable |= negations
+            disjunctive_recall_truthtable = copy.deepcopy(recall_truth_table)
+            assert len(disjunctive_recall_truthtable) == len(precision_truth_table)
 
             for level in range(2, self.max_disjunction_size + 1):
+                assert len(disjunctive_recall_truthtable) == len(precision_truth_table)
                 logger.debug(f"Disjunction size: {level}")
-                for rows in itertools.product(*[recall_truth_table for _ in range(level)]):
-                    if not all(row_1 != row_2
-                               for idx_1, row_1 in enumerate(rows)
-                               for idx_2, row_2 in enumerate(rows)
-                               if idx_1 < idx_2):
-                        continue
 
-                    if any(row_1 == -row_2
-                           for idx_1, row_1 in enumerate(rows)
-                           for idx_2, row_2 in enumerate(rows)
-                           if idx_1 < idx_2):
-                        continue
+                for rows_with_indices in itertools.combinations(enumerate(recall_truth_table), level):
+                    assert len(disjunctive_recall_truthtable) == len(precision_truth_table)
+                    assert all(rwi[1].formula == precision_truth_table[rwi[0]].formula for rwi in rows_with_indices)
 
-                    if all(row in negations for row in rows):
-                        continue
+                    max_num_negations = level // 2 if self.include_negations_in_disjunctions else 0
+                    for formulas_to_negate in (
+                            t for t in itertools.product(*[[0, 1] for _ in range(3)]) if sum(t) <= max_num_negations):
 
-                    disjunction = functools.reduce(TruthTableRow.__or__, rows)
-                    new_eval_result = disjunction.eval_result()
-                    if (new_eval_result < self.min_recall or
-                            not all(new_eval_result > row.eval_result() for row in rows)):
-                        continue
+                        # To ensure that only "meaningful" properties are negated, the un-negated properties
+                        # should hold for at least 20% of all inputs; but at most for 80%, since otherwise,
+                        # the negation is overly specific.
+                        negated_rows: List[Tuple[int, TruthTableRow]] = list(
+                            itertools.compress(rows_with_indices, formulas_to_negate))
+                        if any(.8 < negated_row.eval_result() < .2 for _, negated_row in negated_rows):
+                            continue
 
-                    disjunctive_precision_truthtable.rows.add(disjunction)
+                        recall_table_rows = [
+                            -row if bool(negate) else row
+                            for negate, (_, row) in zip(formulas_to_negate, rows_with_indices)]
 
-            recall_truth_table = disjunctive_precision_truthtable
+                        # Compute recall of disjunction, add if above threshold and
+                        # an improvement over all participants of the disjunction
+                        disjunction = functools.reduce(TruthTableRow.__or__, recall_table_rows)
+                        new_precision = disjunction.eval_result()
+                        if (new_precision < self.min_recall or
+                                not all(new_precision > row.eval_result() for row in recall_table_rows)):
+                            continue
+
+                        disjunctive_recall_truthtable.append(disjunction)
+
+                        if precision_truth_table is not None:
+                            # Also add disjunction to the precision truth table. Saves us a couple of evaluations.
+                            precision_table_rows = [
+                                -precision_truth_table[idx] if bool(negate) else precision_truth_table[idx]
+                                for negate, (idx, _) in zip(formulas_to_negate, rows_with_indices)]
+                            disjunction = functools.reduce(TruthTableRow.__or__, precision_table_rows)
+                            precision_truth_table.append(disjunction)
+
+            recall_truth_table = disjunctive_recall_truthtable
 
             invariants = {
-                language.ensure_unique_bound_variables(row.formula) for row in recall_truth_table
+                row.formula for row in recall_truth_table
                 if row.eval_result() >= self.min_recall
             }
 
-            logger.info("%d invariants after building Boolean combinations.", len(invariants))
+            logger.info(
+                "%d invariants with recall >= %d%% remain after building Boolean combinations.",
+                len(invariants),
+                int(self.min_recall * 100))
+
             # logger.debug(
             #   "Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
@@ -471,52 +520,68 @@ class InvariantLearner:
         # )
 
         if not self.negative_examples:
-            invariants = sorted(list(invariants), key=lambda inv: len(inv))
+            if ensure_unique_var_names:
+                invariants = sorted(list(map(ensure_unique_bound_variables, invariants)), key=lambda inv: len(inv))
+            else:
+                invariants = sorted(list(invariants), key=lambda inv: len(inv))
             return {inv: 1.0 for inv in invariants}
 
-        logger.info("Evaluating precision.")
-        logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
-
-        precision_truth_table = TruthTable([
-            TruthTableRow(inv, self.negative_examples)
-            for inv in invariants
-        ]).evaluate(
-            self.grammar,
-            rows_parallel=True,
-        )
+        # precision_truth_table = TruthTable([
+        #     TruthTableRow(inv, self.negative_examples)
+        #     for inv in invariants
+        # ]).evaluate(
+        #     self.grammar,
+        #     rows_parallel=True,
+        # )
 
         logger.info("Calculating precision of Boolean combinations.")
-
         conjunctive_precision_truthtable = copy.copy(precision_truth_table)
         for level in range(2, self.max_conjunction_size + 1):
             logger.debug(f"Conjunction size: {level}")
-            for rows in itertools.product(*[precision_truth_table for _ in range(level)]):
-                if not all(row_1 != row_2
-                           for idx_1, row_1 in enumerate(rows)
-                           for idx_2, row_2 in enumerate(rows)
-                           if idx_1 < idx_2):
+            for rows_with_indices in itertools.combinations(enumerate(precision_truth_table), level):
+                assert len(recall_truth_table) == len(precision_truth_table)
+                assert all(rwi[1].formula == recall_truth_table[rwi[0]].formula for rwi in rows_with_indices)
+
+                precision_table_rows = [row for (_, row) in rows_with_indices]
+
+                # TODO Remove
+                # if (any('"--"' in str(row.formula) for row in precision_table_rows)
+                #         and any('"graph"' in str(row.formula) for row in precision_table_rows)
+                #         and any('"->"' in str(row.formula) for row in precision_table_rows)
+                #         and any('"digraph"' in str(row.formula) for row in precision_table_rows)):
+                #     print()
+
+                # Only consider combinations where all rows meet minimum recall requirement.
+                # Recall doesn't get better by forming conjunctions!
+                if not all(recall_truth_table[idx].eval_result() >= self.min_recall
+                           for idx, _ in rows_with_indices):
                     continue
 
-                disjunction = functools.reduce(TruthTableRow.__and__, rows)
-                new_eval_result = disjunction.eval_result()
-                if (new_eval_result < self.min_precision or
-                        not all(new_eval_result < row.eval_result() for row in rows)):
+                # Compute precision of conjunction, add if above threshold and
+                # an improvement over all participants of the conjunction
+                conjunction = functools.reduce(TruthTableRow.__and__, precision_table_rows)
+                new_precision = 1 - conjunction.eval_result()
+                if (new_precision < self.min_precision or
+                        not all(new_precision > 1 - row.eval_result() for row in precision_table_rows)):
                     continue
 
-                conjunctive_precision_truthtable.rows.add(disjunction)
+                conjunctive_precision_truthtable.append(conjunction)
 
         precision_truth_table = conjunctive_precision_truthtable
 
         result: Dict[language.Formula, float] = {
-            language.ensure_unique_bound_variables(row.formula): 1 - row.eval_result()
+            row.formula if not ensure_unique_var_names
+            else language.ensure_unique_bound_variables(row.formula):
+                1 - row.eval_result()
             for row in precision_truth_table
-            if 1 - row.eval_result() >= self.min_precision
+            if (1 - row.eval_result() >= self.min_precision)
         }
 
         logger.info(
-            "Found %d invariants with precision >= %d%%.",
-            len([p for p in result.values() if p > self.min_precision]),
-            int(self.min_precision * 100)
+            "Found %d invariants with precision >= %d%% and recall >= %d%%.",
+            len([p for p in result.values() if p >= self.min_precision]),
+            int(self.min_precision * 100),
+            int(self.min_recall * 100),
         )
 
         return dict(
@@ -612,11 +677,14 @@ class InvariantLearner:
                 instantiations: List[Dict[StringPlaceholderVariable, str]] = dict_of_lists_to_list_of_dicts(
                     string_placeholder_insts[formula])
                 for instantiation in instantiations:
-                    if any(not approximately_evaluate_abst_for(
-                            formula,
-                            self.grammar,
-                            {language.Constant("start", "<start>"): ((), subtrees[()])} | instantiation,
-                            subtrees).is_false() for subtrees in inputs_subtrees):
+                    if any(
+                            not approximately_evaluate_abst_for(
+                                formula,
+                                self.grammar,
+                                self.graph,
+                                {language.Constant("start", "<start>"): ((), subtrees[()])} | instantiation, subtrees
+                            ).is_false()
+                            for subtrees in inputs_subtrees):
                         instantiated_formula = formula
                         for ph, inst in instantiation.items():
                             instantiated_formula = language.replace_formula(
@@ -640,11 +708,14 @@ class InvariantLearner:
             inputs_subtrees: Iterable[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
         return {
             pattern for pattern in formulas
-            if any(not approximately_evaluate_abst_for(
-                pattern,
-                self.grammar,
-                {language.Constant("start", "<start>"): ((), subtrees[()])},
-                subtrees).is_false() for subtrees in inputs_subtrees)
+            if any(
+                not approximately_evaluate_abst_for(
+                    pattern,
+                    self.grammar,
+                    self.graph,
+                    {language.Constant("start", "<start>"): ((), subtrees[()])},
+                    subtrees).is_false()
+                for subtrees in inputs_subtrees)
         }
 
     def _apply_filters(
@@ -1424,6 +1495,7 @@ def substitute_string_placeholder(
 def approximately_evaluate_abst_for(
         formula: language.Formula,
         grammar: Grammar,
+        graph: gg.GrammarGraph,
         assignments: Dict[language.Variable, Tuple[Path, language.DerivationTree] | str],
         subtrees: Dict[Path, language.DerivationTree]) -> ThreeValuedTruth:
     # TODO: Handle String placeholder variables in predicate formulas
@@ -1469,8 +1541,7 @@ def approximately_evaluate_abst_for(
                         in assignments.items()}.items())))
 
     elif isinstance(formula, language.NumericQuantifiedFormula):
-        return approximately_evaluate_abst_for(
-            formula.inner_formula, grammar, assignments, subtrees)
+        return approximately_evaluate_abst_for(formula.inner_formula, grammar, graph, assignments, subtrees)
     elif isinstance(formula, language.QuantifiedFormula):
         assert isinstance(formula.in_variable, language.Variable)
         assert formula.in_variable in assignments
@@ -1512,11 +1583,13 @@ def approximately_evaluate_abst_for(
 
         if isinstance(formula, language.ExistsFormula):
             return ThreeValuedTruth.from_bool(any(
-                not approximately_evaluate_abst_for(formula.inner_formula, grammar, new_assignment, subtrees).is_false()
+                not approximately_evaluate_abst_for(
+                    formula.inner_formula, grammar, graph, new_assignment, subtrees).is_false()
                 for new_assignment in new_assignments))
         else:
             return ThreeValuedTruth.from_bool(all(
-                not approximately_evaluate_abst_for(formula.inner_formula, grammar, new_assignment, subtrees).is_false()
+                not approximately_evaluate_abst_for(
+                    formula.inner_formula, grammar, graph, new_assignment, subtrees).is_false()
                 for new_assignment in new_assignments))
     elif isinstance(formula, language.StructuralPredicateFormula):
         if any(isinstance(arg, PlaceholderVariable) for arg in formula.args):
@@ -1537,7 +1610,7 @@ def approximately_evaluate_abst_for(
         arg_insts = [arg if isinstance(arg, language.DerivationTree) or arg not in assignments
                      else assignments[arg][1]
                      for arg in formula.args]
-        eval_res = formula.predicate.evaluate(grammar, *arg_insts)
+        eval_res = formula.predicate.evaluate(graph, *arg_insts)
 
         if eval_res.true():
             return ThreeValuedTruth.true()
@@ -1553,16 +1626,16 @@ def approximately_evaluate_abst_for(
         assignments.update({const: (tuple(), assgn) for const, assgn in eval_res.result.items()})
         return ThreeValuedTruth.true()
     elif isinstance(formula, language.NegatedFormula):
-        return ThreeValuedTruth.not_(approximately_evaluate_abst_for(
-            formula.args[0], grammar, assignments, subtrees))
+        return ThreeValuedTruth.not_(
+            approximately_evaluate_abst_for(formula.args[0], grammar, graph, assignments, subtrees))
     elif isinstance(formula, language.ConjunctiveFormula):
         # Relaxation: Unknown is OK, only False is excluded.
         return ThreeValuedTruth.from_bool(all(
-            not approximately_evaluate_abst_for(sub_formula, grammar, assignments, subtrees).is_false()
+            not approximately_evaluate_abst_for(sub_formula, grammar, graph, assignments, subtrees).is_false()
             for sub_formula in formula.args))
     elif isinstance(formula, language.DisjunctiveFormula):
         return ThreeValuedTruth.from_bool(any(
-            not approximately_evaluate_abst_for(sub_formula, grammar, assignments, subtrees).is_false()
+            not approximately_evaluate_abst_for(sub_formula, grammar, graph, assignments, subtrees).is_false()
             for sub_formula in formula.args))
     else:
         raise NotImplementedError()

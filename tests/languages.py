@@ -234,9 +234,9 @@ IPv4_GRAMMAR = {
 DOT_GRAMMAR = {
     "<start>": ["<graph>"],
     "<graph>": [
-        "<maybe_strict><GRAPH><maybe_space_id><MWSS>{<MWSS><stmt_list><MWSS>}",
-        "<maybe_strict><DIGRAPH><maybe_space_id><MWSS>{<MWSS><stmt_list><MWSS>}",
+        "<maybe_strict><graph_type><maybe_space_id><MWSS>{<MWSS><stmt_list><MWSS>}",
     ],
+    "<graph_type>": ["<GRAPH>", "<DIGRAPH>"],
     "<stmt_list>": ["<stmt><MWSS><maybe_semi><MWSS><stmt_list>", "<stmt><MWSS><maybe_semi>", ""],
     "<stmt>": ["<edge_stmt>", "<attr_stmt>", "<id><MWSS>=<MWSS><id>", "<subgraph>", "<node_stmt>"],
     "<attr_stmt>": ["<GRAPH><MWSS><attr_list>", "<NODE><MWSS><attr_list>", "<EDGE><MWSS><attr_list>"],

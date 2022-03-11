@@ -3,6 +3,7 @@ import string
 import unittest
 
 from fuzzingbook.Parser import PEGParser
+from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import parse_isla
@@ -90,11 +91,13 @@ forall <start> container in start:
         self.assertTrue(evaluate(checksum_constraint, wrong_ping_request_message, ICMP_GRAMMAR).is_unknown())
 
         # The approximate evaluator should return False instead of Unknown
-        self.assertTrue(approximately_evaluate_abst_for(
-            checksum_constraint,
-            ICMP_GRAMMAR,
-            {language.Constant("start", "<start>"): ((), wrong_ping_request_message)},
-            dict(wrong_ping_request_message.paths())).is_false())
+        self.assertTrue(
+            approximately_evaluate_abst_for(
+                checksum_constraint,
+                ICMP_GRAMMAR,
+                gg.GrammarGraph.from_grammar(ICMP_GRAMMAR),
+                {language.Constant("start", "<start>"): ((), wrong_ping_request_message)},
+                dict(wrong_ping_request_message.paths())).is_false())
 
     def test_checksum_random_ping_packet(self):
         checksum_constraint = parse_isla("""

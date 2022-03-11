@@ -14,7 +14,7 @@ from fuzzingbook.Grammars import srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
-from isla.evaluator import evaluate
+from isla.evaluator import evaluate, implies
 from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
@@ -771,11 +771,13 @@ forall <expr> use_ctx in start:
 
         subtrees = tuple(inp.paths())
 
-        self.assertTrue(approximately_evaluate_abst_for(
-            property,
-            scriptsizec.SCRIPTSIZE_C_GRAMMAR,
-            {language.Constant("start", "<start>"): ((), inp)},
-            dict(subtrees)).is_true())
+        self.assertTrue(
+            approximately_evaluate_abst_for(
+                property,
+                scriptsizec.SCRIPTSIZE_C_GRAMMAR,
+                gg.GrammarGraph.from_grammar(scriptsizec.SCRIPTSIZE_C_GRAMMAR),
+                {language.Constant("start", "<start>"): ((), inp)},
+                dict(subtrees)).is_true())
 
     def test_evaluation_xml_balance(self):
         property = parse_isla("""
@@ -787,11 +789,13 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
 
         subtrees = tuple(inp.paths())
 
-        self.assertTrue(approximately_evaluate_abst_for(
-            property,
-            xml_lang.XML_GRAMMAR,
-            {language.Constant("start", "<start>"): ((), inp)},
-            dict(subtrees)).is_true())
+        self.assertTrue(
+            approximately_evaluate_abst_for(
+                property,
+                xml_lang.XML_GRAMMAR,
+                gg.GrammarGraph.from_grammar(xml_lang.XML_GRAMMAR),
+                {language.Constant("start", "<start>"): ((), inp)},
+                dict(subtrees)).is_true())
 
     def test_icmp_ping_request(self):
         expected_checksum_constraint = parse_abstract_isla("""
@@ -929,21 +933,20 @@ forall <ip_message> container in start:
         self.assertIn(length_constraint, result.keys())
 
     def test_learn_graphviz(self):
-        digraph_edge_op_constraint = parse_isla("""
-(forall <graph> container in start:
-   exists <DIGRAPH> elem in container:
-     (= elem "digraph") and
-forall <graph> container_0 in start:
-  exists <edgeop> elem_0 in container_0:
-    (= elem_0 "->"))""", DOT_GRAMMAR)
-
-        graph_edge_op_constraint = parse_isla("""
-(forall <graph> container in start:
-   exists <GRAPH> elem in container:
-     (= elem "graph") and
-forall <graph> container_0 in start:
-  exists <edgeop> elem_0 in container_0:
-    (= elem_0 "--"))""", DOT_GRAMMAR)
+        optimum_constraint = parse_isla("""
+((forall <edge_stmt> container in start:
+    exists <edgeop> elem in container:
+      (= elem "--") or
+ forall <graph_type> container_0 in start:
+   exists <DIGRAPH> elem_0 in container_0:
+     (= elem_0 "digraph")) and
+(forall <edge_stmt> container_1 in start:
+   exists <edgeop> elem_1 in container_1:
+     (= elem_1 "->") or
+forall <graph_type> container_2 in start:
+  exists <GRAPH> elem_2 in container_2:
+    (= elem_2 "graph")))
+""".strip())
 
         # urls = [
         #     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
@@ -962,15 +965,25 @@ forall <graph> container_0 in start:
         #                       .strip())
         #     trees.append(language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
 
-        inputs = [
+        positive_inputs = [
             "digraph { a -> b }",
-            "graph { x -- y }",
-            "graph { u; v; u -- v }",
-            "digraph asdf { c; d; e; f; c -> d; e -> f; }",
+            "graph gg { a -- b }",
+            "graph { a; b; a -- c }",
+            "digraph { a; b; c; d; c -> d; a -> c; }",
         ]
-        trees = [
+        positive_trees = [
             language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
-            for inp in inputs]
+            for inp in positive_inputs]
+
+        negative_inputs = [
+            "digraph { a -- b }",
+            "graph gg { a -> b }",
+            "graph { a; b; a -> b }",
+            "digraph { a; b; c; d; c -- d; a -> b; }",
+        ]
+        negative_trees = [
+            language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
+            for inp in negative_inputs]
 
         ##############
         # repo = patterns_from_file()
@@ -1001,18 +1014,20 @@ forall <graph> container_0 in start:
             DOT_GRAMMAR,
             prop=prop,
             activated_patterns={"String Existence"},
-            positive_examples=trees,
+            positive_examples=positive_trees,
+            negative_examples=negative_trees,
             target_number_positive_samples_for_learning=6,
             target_number_negative_samples=9,
             max_disjunction_size=2,
-            include_negations_in_disjunctions=True,
+            include_negations_in_disjunctions=False,
             max_conjunction_size=2,
-            min_recall=.3,
-            min_precision=.4,
+            min_recall=1,
+            min_precision=1,
             reduce_all_inputs=True,
             generate_new_learning_samples=False,
+            do_generate_more_inputs=False,
             # reduce_inputs_for_learning=True,
-            # perform_static_implication_check=True,
+            perform_static_implication_check=True,
             exclude_nonterminals={
                 "<WS>", "<WSS>", "<MWSS>",
                 "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
@@ -1026,8 +1041,9 @@ forall <graph> container_0 in start:
             lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
             {f: p for f, p in result.items() if p > .0}.items())))
 
-        self.assertIn(digraph_edge_op_constraint, result.keys())
-        self.assertIn(graph_edge_op_constraint, result.keys())
+        self.assertTrue(any(
+            implies(rf, optimum_constraint, DOT_GRAMMAR) and
+            implies(optimum_constraint, rf, DOT_GRAMMAR) for rf in result.keys()))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()
