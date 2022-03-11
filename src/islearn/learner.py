@@ -379,14 +379,19 @@ class InvariantLearner:
             result_threshold=self.min_recall
         )
 
+        if self.max_disjunction_size < 2:
+            for row in recall_truth_table:
+                if row.eval_result() < self.min_recall:
+                    recall_truth_table.remove(row)
+
         precision_truth_table = None
         if self.negative_examples:
             logger.info("Evaluating precision.")
             # logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
 
             precision_truth_table = TruthTable([
-                TruthTableRow(inv, self.negative_examples)
-                for inv in candidates
+                TruthTableRow(row.formula, self.negative_examples)
+                for row in recall_truth_table
             ]).evaluate(
                 self.grammar,
                 # rows_parallel=True
