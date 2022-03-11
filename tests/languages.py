@@ -241,10 +241,8 @@ DOT_GRAMMAR = {
     "<stmt>": ["<edge_stmt>", "<attr_stmt>", "<id><MWSS>=<MWSS><id>", "<subgraph>", "<node_stmt>"],
     "<attr_stmt>": ["<GRAPH><MWSS><attr_list>", "<NODE><MWSS><attr_list>", "<EDGE><MWSS><attr_list>"],
     "<maybe_attr_list>": ["<attr_list>", ""],
-    "<attr_list>": ["[<MWSS><maybe_a_list><MWSS>]<MWSS><attr_list>", "[<MWSS><maybe_a_list><MWSS>]"],
-    "<maybe_a_list>": ["<a_list>", ""],
-    "<a_list>": ["<id><maybe_eq_id><MWSS><maybe_comma><MWSS><a_list>", "<id><maybe_eq_id><MWSS><maybe_comma>"],
-    "<maybe_eq_id>": ["<MWSS>=<MWSS><id>", ""],
+    "<attr_list>": ["[<MWSS><a_list><MWSS>]<MWSS><attr_list>", "[<MWSS><a_list><MWSS>]"],
+    "<a_list>": ["<id><MWSS>=<MWSS><id><MWSS><maybe_comma><MWSS><a_list>", "<id><MWSS>=<MWSS><id><MWSS><maybe_comma>"],
     "<edge_stmt>": [
         "<node_id><MWSS><edgeRHS><MWSS><maybe_attr_list>",
         "<subgraph><MWSS><edgeRHS><MWSS><maybe_attr_list>",

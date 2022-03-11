@@ -27,9 +27,87 @@ class TestReducer(unittest.TestCase):
         result = reducer.reduce_by_smallest_subtree_replacement(tree)
 
         # print(tree)
-        # print(result)
+        print(result)
 
         self.assertTrue(render_dot(result) is True)
+        self.assertLess(len(str(result)), len(str(tree)) / 3)
+
+    def test_reduce_dot_negative(self):
+        dot_with_error = """
+digraph {
+    IDLE
+    READY
+    ACTIVATED
+    DEACTIVATED
+    PRESS_FROM_ACTIVE
+    FINISHED_FROM_ACTIVE
+    IDLE_IN_DANCE
+    READY_IN_DANCE
+    FINISHED
+    LOCKED
+    READY_LOCKED
+    RESTART
+    IN_ONE_SHOT
+
+    FINISHED -- RESTART;
+    RESTART -> IDLE;
+    DEACTIVATED -> IDLE_IN_DANCE;
+
+    IN_ONE_SHOT -> RESTART [label="non-one-shot key went through", color="blue"];
+    
+    ACTIVATED -> PRESS_FROM_ACTIVE [label="dance timer", color="green"];
+    IDLE_IN_DANCE -> FINISHED [label="dance timer", color="green"];
+    PRESS_FROM_ACTIVE -> FINISHED_FROM_ACTIVE [label="dance timer", color="green"];
+
+    READY -> IDLE [label="superchord active", color="red"];
+    READY_IN_DANCE -> IDLE_IN_DANCE [label="superchord active", color="red"];
+    READY_LOCKED -> LOCKED [label="superchord active", color="red"];
+
+    LOCKED -> READY_LOCKED [label="all keys pressed", color="orange"];
+    IDLE -> READY [label="all keys pressed", color="orange"];
+    IDLE_IN_DANCE -> READY_IN_DANCE [label="all keys pressed", color="orange"];
+
+    READY_LOCKED -> RESTART [label="chord timer", color="orange"];
+    READY -> ACTIVATED [label="chord timer", color="orange"];
+    READY_IN_DANCE -> ACTIVATED [label="chord timer", color="orange"];
+    ACTIVATED -> PRESS_FROM_ACTIVE [label="lock next", color="orange"];
+    PRESS_FROM_ACTIVE -> LOCKED [label="lock next", color="orange"];
+
+    ACTIVATED -> DEACTIVATED [label="a key lifted", color="purple"];
+    PRESS_FROM_ACTIVE -> RESTART [label="a key lifted", color="orange"];
+    FINISHED_FROM_ACTIVE -> DEACTIVATED [label="a key lifted", color="orange"];
+}""".strip()
+
+        dot_with_error = """
+graph {
+    graph [ overlapse=false ];
+    node [ fontsize=10 shape=circle ];
+
+    "h1.n1.net" -> "h2.n1.net" -- "h3.n1.net" -- "h4.n1.net" -- "h1.n1.net";
+    "h1.n1.net" -- "h3.n1.net";
+    "h2.n1.net" -- "h4.n1.net";
+
+    "h1.n2.net" -- "h2.n2.net" -- "h3.n2.net" -- "h4.n2.net" -- "h1.n2.net";
+    "h1.n2.net" -- "h3.n2.net";
+    "h2.n2.net" -- "h4.n2.net";
+
+    "h1.n3.net" -- "h2.n3.net" -- "h3.n3.net" -- "h4.n3.net" -- "h1.n3.net";
+    "h1.n3.net" -- "h3.n3.net";
+    "h2.n3.net" -- "h4.n3.net";
+
+    "h1.n3.net" -- "h1.n2.net" -- "h1.n1.net" -- "h1.n3.net";
+}""".strip()
+
+        tree = DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_with_error))[0])
+
+        reducer = InputReducer(DOT_GRAMMAR, lambda t: not (render_dot(t) is True))
+
+        result = reducer.reduce_by_smallest_subtree_replacement(tree)
+
+        # print(tree)
+        print(result)
+
+        self.assertFalse(render_dot(result) is True)
         self.assertLess(len(str(result)), len(str(tree)) / 3)
 
     def test_reduce_scriptsize_c(self):

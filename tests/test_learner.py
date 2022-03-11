@@ -956,47 +956,32 @@ forall <ip_message> container in start:
         self.assertIn(length_constraint, result.keys())
 
     def test_learn_graphviz(self):
-        optimum_constraint = parse_isla("""
-((forall <edge_stmt> container in start:
-    exists <edgeop> elem in container:
-      (= elem "--") or
- forall <graph_type> container_0 in start:
-   exists <DIGRAPH> elem_0 in container_0:
-     (= elem_0 "digraph")) and
-(forall <edge_stmt> container_1 in start:
-   exists <edgeop> elem_1 in container_1:
-     (= elem_1 "->") or
-forall <graph_type> container_2 in start:
-  exists <GRAPH> elem_2 in container_2:
-    (= elem_2 "graph")))
-""".strip())
-
-        # urls = [
-        #     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
-        #     "https://raw.githubusercontent.com/hisenyiu2015/android_kernel_realme_sm8150/d5f2e1cc211fa7e0b3bed87a836d562ceb181878/Documentation/media/uapi/v4l/pipeline.dot",
-        #     "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
-        #     # Below one is graph, not digraph
-        #     "https://raw.githubusercontent.com/nathanaelle/wireguard-topology/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
-        # ]
-        #
-        # trees = []
-        # for url in urls:
-        #     with urllib.request.urlopen(url) as f:
-        #         dot_code = (re.sub(r"(^|\n)\s*//.*?(\n|$)", "", f.read().decode('utf-8'))
-        #                       .replace("\\n", "\n")
-        #                       .replace("\r\n", "\n")
-        #                       .strip())
-        #     trees.append(language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
-
-        positive_inputs = [
-            "digraph { a -> b }",
-            "graph gg { a -- b }",
-            "graph { a; b; a -- c }",
-            "digraph { a; b; c; d; c -> d; a -> c; }",
+        urls = [
+            "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
+            # "https://raw.githubusercontent.com/hisenyiu2015/android_kernel_realme_sm8150/d5f2e1cc211fa7e0b3bed87a836d562ceb181878/Documentation/media/uapi/v4l/pipeline.dot",
+            "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
+            # Below one is graph, not digraph
+            "https://raw.githubusercontent.com/nathanaelle/wireguard-topology/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
         ]
-        positive_trees = [
-            language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
-            for inp in positive_inputs]
+
+        positive_trees = []
+        for url in urls:
+            with urllib.request.urlopen(url) as f:
+                dot_code = (re.sub(r"(^|\n)\s*//.*?(\n|$)", "", f.read().decode('utf-8'))
+                              .replace("\\n", "\n")
+                              .replace("\r\n", "\n")
+                              .strip())
+            positive_trees.append(language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
+
+        # positive_inputs = [
+        #     "digraph { a -> b }",
+        #     "graph gg { c -- x }",
+        #     "graph { a; y; a -- y }",
+        #     "digraph { a; b; c; d; c -> d; a -> c; }",
+        # ]
+        # positive_trees = [
+        #     language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
+        #     for inp in positive_inputs]
 
         negative_inputs = [
             "digraph { a -- b }",
@@ -1033,30 +1018,37 @@ forall <graph_type> container_2 in start:
         def prop(tree: language.DerivationTree) -> bool:
             return render_dot(tree) is True
 
+        # TODO: -> / digraph relationship can be learned as def-use?
+        # TODO: There's a hidden balance property, e.g., in labels:
+        #       For each opening < in a String there has to be a closing >.
+        #       See (commented) 2nd URL.
+
         result = InvariantLearner(
             DOT_GRAMMAR,
             prop=prop,
             activated_patterns={"String Existence"},
             positive_examples=positive_trees,
-            negative_examples=negative_trees,
-            target_number_positive_samples_for_learning=6,
-            target_number_negative_samples=9,
+            # negative_examples=negative_trees,
+            target_number_positive_samples=15,
+            # target_number_positive_samples_for_learning=6,
+            target_number_negative_samples=20,
             max_disjunction_size=2,
             include_negations_in_disjunctions=False,
+            filter_inputs_for_learning_by_kpaths=False,
             max_conjunction_size=2,
             min_recall=1,
             min_precision=1,
             reduce_all_inputs=True,
             generate_new_learning_samples=False,
-            do_generate_more_inputs=False,
+            # do_generate_more_inputs=False,
             # reduce_inputs_for_learning=True,
-            perform_static_implication_check=True,
+            # perform_static_implication_check=True,
             exclude_nonterminals={
                 "<WS>", "<WSS>", "<MWSS>",
                 "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
                 "<LETTER>", "<maybe_minus>", "<maybe_comma>", "<maybe_semi>"
             }
-        ).learn_invariants()
+        ).learn_invariants(ensure_unique_var_names=False)
 
         print(len(result))
         # print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
@@ -1064,9 +1056,17 @@ forall <graph_type> container_2 in start:
             lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(),
             {f: p for f, p in result.items() if p > .0}.items())))
 
-        self.assertTrue(any(
-            implies(rf, optimum_constraint, DOT_GRAMMAR) and
-            implies(optimum_constraint, rf, DOT_GRAMMAR) for rf in result.keys()))
+        self.assertTrue(all(
+            evaluate(f, inp, DOT_GRAMMAR).is_true()
+            for f in result.keys()
+            for inp in positive_trees
+        ))
+
+        self.assertTrue(all(
+            evaluate(f, inp, DOT_GRAMMAR).is_false()
+            for f in result.keys()
+            for inp in negative_trees
+        ))
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

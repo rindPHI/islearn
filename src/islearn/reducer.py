@@ -18,6 +18,8 @@ class InputReducer:
         self.k = k
 
     def reduce_by_smallest_subtree_replacement(self, inp: DerivationTree) -> DerivationTree:
+        self.logger.debug("Reducing %s", inp)
+
         k_paths_in_inp = {
             path for path in inp.k_paths(self.graph, k=self.k)
             if not isinstance(path[-1], gg.TerminalNode) or
@@ -25,7 +27,6 @@ class InputReducer:
 
         result = inp
         while True:
-
             def substitute_action(path: Path, _: DerivationTree):
                 nonlocal result
 
@@ -34,10 +35,7 @@ class InputReducer:
 
                 subtree = result.get_subtree(path)
 
-                if subtree.value == "<esc_or_no_string_endings>":
-                    print()
-
-                matches = [t for p, t in subtree.filter(lambda t: t.value == subtree.value) if p and str(t)]
+                matches = [t for p, t in subtree.filter(lambda t: t.value == subtree.value) if p]
                 if not matches:
                     return
 
@@ -49,23 +47,27 @@ class InputReducer:
 
                     k_paths_in_replacement = {
                         path for path in potential_replacement.k_paths(self.graph, k=self.k)
-                        if not isinstance(path[-1], gg.TerminalNode) or
-                           (not isinstance(path[-1], gg.TerminalNode) and len(path[-1].symbol) > 1)}
+                        if (not isinstance(path[-1], gg.TerminalNode) or
+                            (not isinstance(path[-1], gg.TerminalNode) and len(path[-1].symbol) > 1))}
 
                     if any(path not in k_paths_in_replacement for path in k_paths_in_inp):
                         continue
+
+                    # self.logger.debug("Replacing %s with %s", subtree, match)
 
                     if self.property(potential_replacement):
                         result = potential_replacement
                         return
 
-            inp.traverse(substitute_action, kind=DerivationTree.TRAVERSE_PREORDER)
+            # inp.traverse(substitute_action, kind=DerivationTree.TRAVERSE_PREORDER)
+            inp.bfs(substitute_action)
 
             if result == inp:
                 break
 
             inp = result
 
+        self.logger.debug("Result: %s", result)
         return result
 
     def reduce_by_abstraction(self, inp: DerivationTree) -> DerivationTree:

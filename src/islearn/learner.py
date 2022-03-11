@@ -18,7 +18,7 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate, matches_for_quantified_formula, implies
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
-    is_nonterminal, dict_of_lists_to_list_of_dicts
+    is_nonterminal, dict_of_lists_to_list_of_dicts, assertions_activated
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval, ensure_unique_bound_variables
 from isla.solver import ISLaSolver
@@ -313,13 +313,20 @@ class InvariantLearner:
             assert all(not self.prop(negative_example) for negative_example in self.negative_examples)
 
         if self.reduce_all_inputs and self.prop is not None:
-            logger.info("Reducing inputs w.r.t. property and k=%d.", self.k)
+            logger.info(
+                "Reducing %d positive samples w.r.t. property and k=%d.",
+                len(self.positive_examples),
+                self.k)
             reducer = InputReducer(self.grammar, self.prop, self.k)
             self.positive_examples = [
                 reducer.reduce_by_smallest_subtree_replacement(inp)
                 for inp in self.positive_examples]
 
-            reducer = InputReducer(self.grammar, lambda t: not self.prop, self.k)
+            logger.info(
+                "Reducing %d negative samples w.r.t. property and k=%d.",
+                len(self.negative_examples),
+                self.k)
+            reducer = InputReducer(self.grammar, lambda t: not self.prop(t), self.k)
             self.negative_examples = [
                 reducer.reduce_by_smallest_subtree_replacement(inp)
                 for inp in self.negative_examples]
@@ -345,7 +352,11 @@ class InvariantLearner:
         if ((not self.reduce_all_inputs or not self.generate_new_learning_samples)
                 and self.reduce_inputs_for_learning
                 and self.prop is not None):
-            logger.info("Reducing inputs for learning w.r.t. property and k=%d.", self.k)
+            logger.info(
+                "Reducing %d inputs for learning w.r.t. property and k=%d.",
+                len(self.positive_examples_for_learning),
+                self.k
+            )
             reducer = InputReducer(self.grammar, self.prop, self.k)
             self.positive_examples_for_learning = [
                 reducer.reduce_by_smallest_subtree_replacement(inp)
@@ -387,7 +398,7 @@ class InvariantLearner:
         precision_truth_table = None
         if self.negative_examples:
             logger.info("Evaluating precision.")
-            # logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
+            logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
 
             precision_truth_table = TruthTable([
                 TruthTableRow(row.formula, self.negative_examples)
@@ -411,7 +422,7 @@ class InvariantLearner:
             len(invariants),
             int(self.min_recall * 100))
 
-        # logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
+        logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
         if self.perform_static_implication_check:
             # We eliminate rows in recall_truth_table whose formula is implied by that of
@@ -488,9 +499,9 @@ class InvariantLearner:
                         # Compute recall of disjunction, add if above threshold and
                         # an improvement over all participants of the disjunction
                         disjunction = functools.reduce(TruthTableRow.__or__, recall_table_rows)
-                        new_precision = disjunction.eval_result()
-                        if (new_precision < self.min_recall or
-                                not all(new_precision > row.eval_result() for row in recall_table_rows)):
+                        new_recall = disjunction.eval_result()
+                        if (new_recall < self.min_recall or
+                                not all(new_recall > row.eval_result() for row in recall_table_rows)):
                             continue
 
                         disjunctive_recall_truthtable.append(disjunction)
@@ -518,12 +529,25 @@ class InvariantLearner:
             # logger.debug(
             #   "Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
+        # assert all(evaluate(row.formula, inp, self.grammar).is_true()
+        #            for inp in self.positive_examples
+        #            for row in recall_truth_table
+        #            if row.eval_result() == 1)
+
         if not self.negative_examples:
             if ensure_unique_var_names:
                 invariants = sorted(list(map(ensure_unique_bound_variables, invariants)), key=lambda inv: len(inv))
             else:
                 invariants = sorted(list(invariants), key=lambda inv: len(inv))
             return {inv: 1.0 for inv in invariants}
+
+        indices_to_remove = reversed([
+            idx for idx, row in enumerate(recall_truth_table)
+            if row.eval_result() < self.min_recall])
+        assert sorted(indices_to_remove, reverse=True) == indices_to_remove
+        for idx in indices_to_remove:
+            recall_truth_table.remove(recall_truth_table[idx])
+            precision_truth_table.remove(precision_truth_table[idx])
 
         logger.info("Calculating precision of Boolean combinations.")
         conjunctive_precision_truthtable = copy.copy(precision_truth_table)
@@ -534,8 +558,8 @@ class InvariantLearner:
 
                 # Only consider combinations where all rows meet minimum recall requirement.
                 # Recall doesn't get better by forming conjunctions!
-                if not all(recall_truth_table[idx].eval_result() >= self.min_recall
-                           for idx, _ in rows_with_indices):
+                if any(recall_truth_table[idx].eval_result() < self.min_recall
+                       for idx, _ in rows_with_indices):
                     continue
 
                 # Compute precision of conjunction, add if above threshold and
@@ -550,6 +574,11 @@ class InvariantLearner:
 
         precision_truth_table = conjunctive_precision_truthtable
 
+        # assert all(evaluate(row.formula, inp, self.grammar).is_false()
+        #            for inp in self.negative_examples
+        #            for row in precision_truth_table
+        #            if row.eval_result() == 0)
+
         result: Dict[language.Formula, float] = {
             row.formula if not ensure_unique_var_names
             else language.ensure_unique_bound_variables(row.formula):
@@ -559,10 +588,9 @@ class InvariantLearner:
         }
 
         logger.info(
-            "Found %d invariants with precision >= %d%% and recall >= %d%%.",
+            "Found %d invariants with precision >= %d%%.",
             len([p for p in result.values() if p >= self.min_precision]),
             int(self.min_precision * 100),
-            int(self.min_recall * 100),
         )
 
         return dict(
