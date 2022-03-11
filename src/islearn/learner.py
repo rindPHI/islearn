@@ -375,16 +375,14 @@ class InvariantLearner:
         ]).evaluate(
             self.grammar,
             # rows_parallel=True,
-            # TODO: Check if lazy is needed, removed for now.
-            #       Remove from TruthTable if not needed.
-            # lazy=self.max_disjunction_size < 2,
-            # result_threshold=self.min_recall
+            lazy=self.max_disjunction_size < 2,
+            result_threshold=self.min_recall
         )
 
         precision_truth_table = None
         if self.negative_examples:
             logger.info("Evaluating precision.")
-            logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
+            # logger.debug("Negative samples:\n" + "\n-----------\n".join(map(str, self.negative_examples)))
 
             precision_truth_table = TruthTable([
                 TruthTableRow(inv, self.negative_examples)
