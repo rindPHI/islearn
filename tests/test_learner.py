@@ -5,8 +5,8 @@ import random
 import re
 import string
 import unittest
-from typing import cast, Tuple, Set
 import urllib.request
+from typing import cast, Tuple, Set
 
 import pytest
 import scapy.all as scapy
@@ -22,11 +22,12 @@ from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
 
-from languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
+from languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot, \
+    RACKET_BSL_GRAMMAR, load_racket
 
 
 class TestLearner(unittest.TestCase):
@@ -559,7 +560,7 @@ forall <key> elem in start:
             toml_grammar,
             prop=None,
         )._get_string_placeholder_instantiations(
-            {pattern}, [dict(tree.paths())]
+            {pattern}, [tree.trie()]
         )
 
         self.assertEqual(1, len(result))
@@ -787,15 +788,13 @@ forall <expr> use_ctx in start:
         inp = language.DerivationTree.from_parse_tree(
             next(EarleyParser(scriptsizec.SCRIPTSIZE_C_GRAMMAR).parse("{int c;c < 0;}")))
 
-        subtrees = tuple(inp.paths())
-
         self.assertTrue(
             approximately_evaluate_abst_for(
                 property,
                 scriptsizec.SCRIPTSIZE_C_GRAMMAR,
                 gg.GrammarGraph.from_grammar(scriptsizec.SCRIPTSIZE_C_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), inp)},
-                dict(subtrees)).is_true())
+                inp.trie()).is_true())
 
     def test_evaluation_xml_balance(self):
         property = parse_isla("""
@@ -805,15 +804,13 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
         inp = language.DerivationTree.from_parse_tree(
             next(EarleyParser(xml_lang.XML_GRAMMAR).parse("<a>b</a>")))
 
-        subtrees = tuple(inp.paths())
-
         self.assertTrue(
             approximately_evaluate_abst_for(
                 property,
                 xml_lang.XML_GRAMMAR,
                 gg.GrammarGraph.from_grammar(xml_lang.XML_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), inp)},
-                dict(subtrees)).is_true())
+                inp.trie()).is_true())
 
     def test_icmp_ping_request(self):
         expected_checksum_constraint = parse_abstract_isla("""
@@ -958,7 +955,6 @@ forall <ip_message> container in start:
     def test_learn_graphviz(self):
         urls = [
             "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
-            # "https://raw.githubusercontent.com/hisenyiu2015/android_kernel_realme_sm8150/d5f2e1cc211fa7e0b3bed87a836d562ceb181878/Documentation/media/uapi/v4l/pipeline.dot",
             "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
             # Below one is graph, not digraph
             "https://raw.githubusercontent.com/nathanaelle/wireguard-topology/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
@@ -968,10 +964,11 @@ forall <ip_message> container in start:
         for url in urls:
             with urllib.request.urlopen(url) as f:
                 dot_code = (re.sub(r"(^|\n)\s*//.*?(\n|$)", "", f.read().decode('utf-8'))
-                              .replace("\\n", "\n")
-                              .replace("\r\n", "\n")
-                              .strip())
-            positive_trees.append(language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
+                            .replace("\\n", "\n")
+                            .replace("\r\n", "\n")
+                            .strip())
+            positive_trees.append(
+                language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
 
         # positive_inputs = [
         #     "digraph { a -> b }",
@@ -1018,7 +1015,6 @@ forall <ip_message> container in start:
         def prop(tree: language.DerivationTree) -> bool:
             return render_dot(tree) is True
 
-        # TODO: -> / digraph relationship can be learned as def-use?
         # TODO: There's a hidden balance property, e.g., in labels:
         #       For each opening < in a String there has to be a closing >.
         #       See (commented) 2nd URL.
@@ -1067,6 +1063,70 @@ forall <ip_message> container in start:
             for f in result.keys()
             for inp in negative_trees
         ))
+
+    def test_racket(self):
+        # The racket syntax check is really expensive; therefore, reduction cannot be used efficiently.
+        # Also, the HTDP examples are pretty small already.
+        urls = [
+            f"https://github.com/johnamata/compsci/raw/"
+            f"cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/{str(i).rjust(3, '0')}.rkt"
+            for i in range(1, 30)
+        ]
+
+        positive_trees = []
+        for url in urls:
+            with urllib.request.urlopen(url) as f:
+                racket_code = f.read().decode('utf-8').replace("\\n", "\n").replace("\r\n", "\n").strip()
+            if "GRacket" in racket_code:
+                # Not a real racket file
+                continue
+            positive_trees.append(
+                language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0]))
+
+        def prop(tree: language.DerivationTree) -> bool:
+            return load_racket(tree) is True
+
+        ##############
+
+        repo = patterns_from_file()
+        candidates = InvariantLearner(
+            RACKET_BSL_GRAMMAR,
+            prop,
+            positive_examples={positive_trees[8]},
+            exclude_nonterminals={
+                "<WSS_NAMES>",
+                "<maybe_wss_names>",
+                "<wss_exprs>",
+                "<maybe_cond_args>",
+                "<strings_mwss>",
+                "<NAME_CHARS>",
+                "<NAME_CHAR>",
+                "<ONENINE>",
+                "<ESC_OR_NO_STRING_ENDINGS>",
+                "<ESC_OR_NO_STRING_ENDING>",
+                "<NO_STRING_ENDING>",
+                "<CHARACTER>",
+                "<DIGIT>",
+                "<LETTERORDIGIT>",
+                "<MWSS>",
+                "<WSS>",
+                "<WS>",
+                "<maybe_comments>",
+                "<COMMENT>",
+                "<HASHDIRECTIVE>",
+                "<NOBR>",
+                "<NOBRs>",
+            },
+        ).generate_candidates(
+            repo["Def-Use (C)"],
+            {positive_trees[8]}
+        )
+
+        print(len(candidates))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        return
+        ##############
 
     def test_load_patterns_from_file(self):
         patterns = patterns_from_file()

@@ -8,8 +8,9 @@ import pkgutil
 import re
 from abc import ABC
 from functools import lru_cache
-from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence, AbstractSet
+from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
 
+import datrie
 import isla.fuzzer
 import toml
 import z3
@@ -18,7 +19,7 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate, matches_for_quantified_formula, implies
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
-    is_nonterminal, dict_of_lists_to_list_of_dicts, assertions_activated
+    is_nonterminal, dict_of_lists_to_list_of_dicts, get_subtrie, trie_key_to_path, path_to_trie_key
 from isla.isla_predicates import reachable, is_before
 from isla.language import set_smt_auto_eval, ensure_unique_bound_variables
 from isla.solver import ISLaSolver
@@ -54,7 +55,7 @@ class TruthTableRow:
 
     def evaluate(
             self,
-            grammar: Grammar,
+            graph: gg.GrammarGraph,
             columns_parallel: bool = False,
             lazy: bool = False,
             result_threshold: float = .9) -> 'TruthTableRow':
@@ -65,7 +66,7 @@ class TruthTableRow:
         if columns_parallel:
             with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
                 iterator = pool.imap(
-                    lambda inp: evaluate(self.formula, inp, grammar).is_true(),
+                    lambda inp: evaluate(self.formula, inp, graph.grammar, graph=graph).is_true(),
                     self.inputs)
 
                 self.eval_results = []
@@ -86,7 +87,7 @@ class TruthTableRow:
                     self.eval_results += [False for _ in range(len(self.inputs) - len(self.eval_results))]
                     break
 
-                eval_result = evaluate(self.formula, inp, grammar).is_true()
+                eval_result = evaluate(self.formula, inp, graph.grammar, graph=graph).is_true()
                 if not eval_result:
                     negative_results += 1
                 self.eval_results.append(eval_result)
@@ -195,7 +196,7 @@ class TruthTable:
 
     def evaluate(
             self,
-            grammar: Grammar,
+            graph: gg.GrammarGraph,
             columns_parallel: bool = False,
             rows_parallel: bool = False,
             lazy: bool = False,
@@ -209,12 +210,12 @@ class TruthTable:
         if rows_parallel:
             with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
                 self.__rows = set(pool.map(
-                    lambda row: row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold),
+                    lambda row: row.evaluate(graph, columns_parallel, lazy=lazy, result_threshold=result_threshold),
                     self.__rows
                 ))
         else:
             for row in self.__rows:
-                row.evaluate(grammar, columns_parallel, lazy=lazy, result_threshold=result_threshold)
+                row.evaluate(graph, columns_parallel, lazy=lazy, result_threshold=result_threshold)
 
         return self
 
@@ -384,7 +385,7 @@ class InvariantLearner:
             TruthTableRow(inv, self.positive_examples)
             for inv in candidates
         ]).evaluate(
-            self.grammar,
+            self.graph,
             # rows_parallel=True,
             lazy=self.max_disjunction_size < 2,
             result_threshold=self.min_recall
@@ -404,7 +405,7 @@ class InvariantLearner:
                 TruthTableRow(row.formula, self.negative_examples)
                 for row in recall_truth_table
             ]).evaluate(
-                self.grammar,
+                self.graph,
                 # rows_parallel=True
             )
 
@@ -422,7 +423,7 @@ class InvariantLearner:
             len(invariants),
             int(self.min_recall * 100))
 
-        logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
+        # logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
         if self.perform_static_implication_check:
             # We eliminate rows in recall_truth_table whose formula is implied by that of
@@ -541,9 +542,9 @@ class InvariantLearner:
                 invariants = sorted(list(invariants), key=lambda inv: len(inv))
             return {inv: 1.0 for inv in invariants}
 
-        indices_to_remove = reversed([
+        indices_to_remove = list(reversed([
             idx for idx, row in enumerate(recall_truth_table)
-            if row.eval_result() < self.min_recall])
+            if row.eval_result() < self.min_recall]))
         assert sorted(indices_to_remove, reverse=True) == indices_to_remove
         for idx in indices_to_remove:
             recall_truth_table.remove(recall_truth_table[idx])
@@ -616,7 +617,7 @@ class InvariantLearner:
             else pattern
             for pattern in patterns]
 
-        inputs_subtrees: List[Dict[Path, language.DerivationTree]] = [dict(inp.paths()) for inp in inputs]
+        tries: List[datrie.Trie] = [inp.trie() for inp in inputs]
 
         result: Set[language.Formula] = set([])
 
@@ -640,7 +641,7 @@ class InvariantLearner:
                          len(pattern_insts_without_mexpr_placeholders))
 
             pattern_insts_without_mexpr_placeholders = self._filter_partial_instantiations(
-                pattern_insts_without_mexpr_placeholders, inputs_subtrees)
+                pattern_insts_without_mexpr_placeholders, tries)
             logger.debug("%d instantiations remain after filtering",
                          len(pattern_insts_without_mexpr_placeholders))
 
@@ -648,13 +649,13 @@ class InvariantLearner:
             #    This comprises, e.g., `nth(<STRING>, elem, container`.
             pattern_insts_without_special_string_placeholders = \
                 self.__instantiate_special_predicate_string_placeholders(
-                    pattern_insts_without_mexpr_placeholders, inputs_subtrees)
+                    pattern_insts_without_mexpr_placeholders, tries)
 
             logger.debug("Found %d instantiations of pattern after instantiating special predicate string placeholders",
                          len(pattern_insts_without_special_string_placeholders))
 
             pattern_insts_without_special_string_placeholders = self._filter_partial_instantiations(
-                pattern_insts_without_special_string_placeholders, inputs_subtrees)
+                pattern_insts_without_special_string_placeholders, tries)
             logger.debug("%d instantiations remain after filtering",
                          len(pattern_insts_without_special_string_placeholders))
 
@@ -666,16 +667,16 @@ class InvariantLearner:
                          len(pattern_insts_without_nonterminal_string_placeholders))
 
             pattern_insts_without_nonterminal_string_placeholders = self._filter_partial_instantiations(
-                pattern_insts_without_nonterminal_string_placeholders, inputs_subtrees)
+                pattern_insts_without_nonterminal_string_placeholders, tries)
             logger.debug("%d instantiations remain after filtering",
                          len(pattern_insts_without_nonterminal_string_placeholders))
 
             pattern_insts_without_nonterminal_string_placeholders = self._apply_filters(
-                pattern_insts_without_nonterminal_string_placeholders, filters, 1, inputs_subtrees)
+                pattern_insts_without_nonterminal_string_placeholders, filters, 1, tries)
 
             # 5. String placeholders
             string_placeholder_insts = self._get_string_placeholder_instantiations(
-                pattern_insts_without_nonterminal_string_placeholders, inputs_subtrees)
+                pattern_insts_without_nonterminal_string_placeholders, tries)
 
             pattern_insts_without_string_placeholders: Set[language.Formula] = set([])
             for formula in string_placeholder_insts:
@@ -691,9 +692,11 @@ class InvariantLearner:
                                 formula,
                                 self.grammar,
                                 self.graph,
-                                {language.Constant("start", "<start>"): ((), subtrees[()])} | instantiation, subtrees
+                                {language.Constant("start", "<start>"):
+                                     ((), trie[path_to_trie_key(())])} | instantiation,
+                                trie
                             ).is_false()
-                            for subtrees in inputs_subtrees):
+                            for trie in tries):
                         instantiated_formula = formula
                         for ph, inst in instantiation.items():
                             instantiated_formula = language.replace_formula(
@@ -714,7 +717,7 @@ class InvariantLearner:
     def _filter_partial_instantiations(
             self,
             formulas: Iterable[language.Formula],
-            inputs_subtrees: Iterable[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
+            tries: Iterable[datrie.Trie]) -> Set[language.Formula]:
         return {
             pattern for pattern in formulas
             if any(
@@ -722,9 +725,9 @@ class InvariantLearner:
                     pattern,
                     self.grammar,
                     self.graph,
-                    {language.Constant("start", "<start>"): ((), subtrees[()])},
-                    subtrees).is_false()
-                for subtrees in inputs_subtrees)
+                    {language.Constant("start", "<start>"): ((), trie[path_to_trie_key(())])},
+                    trie).is_false()
+                for trie in tries)
         }
 
     def _apply_filters(
@@ -732,7 +735,7 @@ class InvariantLearner:
             formulas: Set[language.Formula],
             filters: List['PatternInstantiationFilter'],
             order: int,
-            inputs: List[Dict[Path, language.DerivationTree]],
+            tries: List[datrie.Trie],
             parallel: bool = False) -> Set[language.Formula]:
         # TODO: Check when parallel evaluation makes sense. In some cases, like
         #       "test_learn_from_islearn_patterns_file," the overhead of parallel
@@ -746,7 +749,7 @@ class InvariantLearner:
 
                 with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
                     eval_results = list(pool.map(
-                        lambda pattern_inst: int(pattern_filter.predicate(pattern_inst, inputs)),
+                        lambda pattern_inst: int(pattern_filter.predicate(pattern_inst, tries)),
                         formulas,
                     ))
 
@@ -754,7 +757,7 @@ class InvariantLearner:
             else:
                 formulas = {
                     pattern_inst for pattern_inst in formulas
-                    if pattern_filter.predicate(pattern_inst, inputs)
+                    if pattern_filter.predicate(pattern_inst, tries)
                 }
 
             logger.debug("%d instantiations remaining after filter '%s'",
@@ -1191,7 +1194,7 @@ class InvariantLearner:
     def __instantiate_special_predicate_string_placeholders(
             self,
             inst_patterns: Set[language.Formula],
-            inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
+            tries: List[datrie.Trie]) -> Set[language.Formula]:
         result: Set[language.Formula] = set([])
 
         for pattern in inst_patterns:
@@ -1217,17 +1220,15 @@ class InvariantLearner:
                 elem_nonterminal = nth_predicate.args[1].n_type
                 container_nonterminal = nth_predicate.args[2].n_type
                 indices: Set[int] = set([])
-                for input_subtrees in inputs_subtrees:
-                    container_trees = [
-                        (path, subtree) for path, subtree in input_subtrees.items()
+                for trie in tries:
+                    container_tries = [
+                        get_subtrie(trie, path) for path, subtree in trie.items()
                         if subtree.value == container_nonterminal]
 
-                    for container_path, container_tree in container_trees:
+                    for container_trie in container_tries:
                         num_occs = len([
-                            subtree for path, subtree in input_subtrees.items()
-                            if (len(path) > len(container_path) and
-                                path[:len(container_path)] == container_path and
-                                subtree.value == elem_nonterminal)])
+                            subtree for subtree in container_trie.values()
+                            if subtree.value == elem_nonterminal])
 
                         indices.update(list(range(1, num_occs + 1)))
 
@@ -1380,8 +1381,7 @@ class InvariantLearner:
     def _get_string_placeholder_instantiations(
             self,
             inst_patterns: Set[language.Formula],
-            inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> \
-            Dict[language.Formula, Dict[StringPlaceholderVariable, Set[str]]]:
+            tries: List[datrie.Trie]) -> Dict[language.Formula, Dict[StringPlaceholderVariable, Set[str]]]:
         if all(not isinstance(placeholder, StringPlaceholderVariable)
                for inst_pattern in inst_patterns
                for placeholder in get_placeholders(inst_pattern)):
@@ -1402,13 +1402,15 @@ class InvariantLearner:
                 many_trivial_terminal_parents.add(nonterminal)
 
         fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
-        for inp in inputs_subtrees:
-            remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(
-                sorted(cast(List[Tuple[Path, language.DerivationTree]], list(inp.items())),
+        for trie in tries:
+            remaining_paths: List[Tuple[str, language.DerivationTree]] = list(
+                sorted(cast(List[Tuple[str, language.DerivationTree]], list(trie.items())),
                        key=lambda p: len(p[0])))
             handled_paths: Dict[str, Set[Path]] = {nonterminal: set([]) for nonterminal in self.grammar}
             while remaining_paths:
-                path, tree = remaining_paths.pop(0)
+                t = remaining_paths.pop(0)
+                path = trie_key_to_path(t[0])
+                tree = t[1]
                 if not is_nonterminal(tree.value):
                     continue
 
@@ -1506,7 +1508,7 @@ def approximately_evaluate_abst_for(
         grammar: Grammar,
         graph: gg.GrammarGraph,
         assignments: Dict[language.Variable, Tuple[Path, language.DerivationTree] | str],
-        subtrees: Dict[Path, language.DerivationTree]) -> ThreeValuedTruth:
+        trie: Optional[datrie.Trie] = None) -> ThreeValuedTruth:
     # TODO: Handle String placeholder variables in predicate formulas
     if isinstance(formula, language.SMTFormula):
         if any(isinstance(arg, PlaceholderVariable) and arg not in assignments
@@ -1550,38 +1552,24 @@ def approximately_evaluate_abst_for(
                         in assignments.items()}.items())))
 
     elif isinstance(formula, language.NumericQuantifiedFormula):
-        return approximately_evaluate_abst_for(formula.inner_formula, grammar, graph, assignments, subtrees)
+        return approximately_evaluate_abst_for(formula.inner_formula, grammar, graph, assignments, trie)
     elif isinstance(formula, language.QuantifiedFormula):
         assert isinstance(formula.in_variable, language.Variable)
         assert formula.in_variable in assignments
         in_path, in_inst = assignments[formula.in_variable]
 
         if formula.bind_expression is None:
-            paths = list(subtrees.keys())
-            in_path_idx = paths.index(in_path)
+            sub_trie = get_subtrie(trie, in_path)
+
             new_assignments: List[Dict[language.Variable, Tuple[Path, language.DerivationTree]]] = []
-            root_path_indices: List[int] = []
-            for path_idx, path in enumerate(paths[in_path_idx + 1:]):
-                if len(path) <= len(in_path):
-                    break
-
-                if subtrees[path].value == formula.bound_variable.n_type:
-                    new_assignments.append({formula.bound_variable: (path, subtrees[path])})
-                    root_path_indices.append(path_idx + in_path_idx + 1)
+            for path_key, subtree in sub_trie.items():
+                if subtree.value == formula.bound_variable.n_type:
+                    new_assignments.append({formula.bound_variable: (in_path + trie_key_to_path(path_key), subtree)})
         else:
-            paths = list(subtrees.keys())
-            in_path_idx = paths.index(in_path)
-            sub_paths = {(): in_inst}
-            for path in paths[in_path_idx + 1:]:
-                if len(path) <= len(in_path):
-                    break
-
-                sub_paths[path[len(in_path):]] = subtrees[path]
-
             new_assignments = [
                 {var: (in_path + path, tree) for var, (path, tree) in new_assignment.items()}
                 for new_assignment in matches_for_quantified_formula(
-                    formula, grammar, in_inst, {}, paths=sub_paths)]
+                    formula, grammar, in_inst, {}, trie=get_subtrie(trie, in_path))]
 
         new_assignments = [
             new_assignment | assignments
@@ -1593,12 +1581,12 @@ def approximately_evaluate_abst_for(
         if isinstance(formula, language.ExistsFormula):
             return ThreeValuedTruth.from_bool(any(
                 not approximately_evaluate_abst_for(
-                    formula.inner_formula, grammar, graph, new_assignment, subtrees).is_false()
+                    formula.inner_formula, grammar, graph, new_assignment, trie).is_false()
                 for new_assignment in new_assignments))
         else:
             return ThreeValuedTruth.from_bool(all(
                 not approximately_evaluate_abst_for(
-                    formula.inner_formula, grammar, graph, new_assignment, subtrees).is_false()
+                    formula.inner_formula, grammar, graph, new_assignment, trie).is_false()
                 for new_assignment in new_assignments))
     elif isinstance(formula, language.StructuralPredicateFormula):
         if any(isinstance(arg, PlaceholderVariable) for arg in formula.args):
@@ -1606,12 +1594,12 @@ def approximately_evaluate_abst_for(
 
         arg_insts = [
             arg if isinstance(arg, str)
-            else next(path for path, subtree in subtrees.items() if subtree.id == arg.id)
+            else next(trie_key_to_path(path) for path, subtree in trie.items() if subtree.id == arg.id)
             if isinstance(arg, language.DerivationTree)
             else assignments[arg][0]
             for arg in formula.args]
 
-        return ThreeValuedTruth.from_bool(formula.predicate.evaluate(subtrees[()], *arg_insts))
+        return ThreeValuedTruth.from_bool(formula.predicate.evaluate(trie.get(path_to_trie_key(())), *arg_insts))
     elif isinstance(formula, language.SemanticPredicateFormula):
         if any(isinstance(arg, PlaceholderVariable) for arg in formula.args):
             return ThreeValuedTruth.unknown()
@@ -1636,15 +1624,15 @@ def approximately_evaluate_abst_for(
         return ThreeValuedTruth.true()
     elif isinstance(formula, language.NegatedFormula):
         return ThreeValuedTruth.not_(
-            approximately_evaluate_abst_for(formula.args[0], grammar, graph, assignments, subtrees))
+            approximately_evaluate_abst_for(formula.args[0], grammar, graph, assignments, trie))
     elif isinstance(formula, language.ConjunctiveFormula):
         # Relaxation: Unknown is OK, only False is excluded.
         return ThreeValuedTruth.from_bool(all(
-            not approximately_evaluate_abst_for(sub_formula, grammar, graph, assignments, subtrees).is_false()
+            not approximately_evaluate_abst_for(sub_formula, grammar, graph, assignments, trie).is_false()
             for sub_formula in formula.args))
     elif isinstance(formula, language.DisjunctiveFormula):
         return ThreeValuedTruth.from_bool(any(
-            not approximately_evaluate_abst_for(sub_formula, grammar, graph, assignments, subtrees).is_false()
+            not approximately_evaluate_abst_for(sub_formula, grammar, graph, assignments, trie).is_false()
             for sub_formula in formula.args))
     else:
         raise NotImplementedError()
@@ -1667,7 +1655,7 @@ class PatternInstantiationFilter(ABC):
     def __hash__(self):
         return hash(self.name)
 
-    def predicate(self, formula: language.Formula, inputs: List[Dict[Path, language.DerivationTree]]) -> bool:
+    def predicate(self, formula: language.Formula, tries: List[datrie.Trie]) -> bool:
         raise NotImplementedError()
 
 
@@ -1686,7 +1674,7 @@ class NonterminalStringInCountPredicatesFilter(PatternInstantiationFilter):
     def reachable_in_inputs(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         return (from_nonterminal, to_nonterminal) in self.input_reachability_relation
 
-    def predicate(self, formula: language.Formula, _: List[Dict[Path, language.DerivationTree]]) -> bool:
+    def predicate(self, formula: language.Formula, _: List[datrie.Trie]) -> bool:
         # In `count(elem, nonterminal, num)` occurrences
         # 1. the nonterminal must be reachable from the nonterminal type of elem. We
         #    consider reachability as defined by the sample inputs, not the grammar,

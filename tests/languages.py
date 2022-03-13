@@ -318,6 +318,26 @@ DOT_GRAMMAR = {
     "<WS>": [" ", "\t", "\n"]
 }
 
+
+def render_dot(tree: language.DerivationTree) -> bool | str:
+    logging.getLogger("graphviz.backend").propagate = False
+    logging.getLogger("graphviz.files").propagate = False
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as outfile:
+        devnull = open(os.devnull, 'w')
+        orig_stderr = sys.stderr
+        sys.stderr = devnull
+
+        err_message = ""
+        try:
+            graphviz.Source(str(tree)).render(outfile.name)
+        except Exception as exc:
+            err_message = str(exc)
+
+        sys.stderr = orig_stderr
+        return True if not err_message else err_message
+
+
 # Grammar source: `https://github.com/antlr/grammars-v4/blob/master/racket-bsl/BSL.g4`
 RACKET_BSL_GRAMMAR = {
     "<start>": ["<program>"],
@@ -330,12 +350,12 @@ RACKET_BSL_GRAMMAR = {
         "(<MWSS>define<MWSS>(<MWSS><name><MWSS>)<MWSS><expr><MWSS>)",
         "(<MWSS>define<WSS><name><MWSS><expr><MWSS>)",
         "(<MWSS>define<WSS><name><MWSS>(lambda<MWSS>(<MWSS><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)<MWSS>)",
-        "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS><name><maybe_wss_name><MWSS>)<MWSS>)",
+        "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS><name><maybe_wss_names><MWSS>)<MWSS>)",
         "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS>)<MWSS>)",
     ],
 
     "<WSS_NAMES>": ["<WSS><NAME><WSS_NAMES>", "<WSS><NAME>"],
-    "<maybe_wss_names>": ["<WSS><name><wss_names>", "<wss><name>", ""],
+    "<maybe_wss_names>": ["<WSS_NAMES>", ""],
 
     "<wss_exprs>": ["<MWSS><expr><wss_exprs>", "<MWSS><expr>"],
 
@@ -385,7 +405,7 @@ RACKET_BSL_GRAMMAR = {
 
     "<name>": ["<SYMBOL>", "<NAME>"],
 
-    # // A symbol is a quote character followed by a name. A symbol is a value, just like 42, '(), or #false.
+    #  A symbol is a quote character followed by a name. A symbol is a value, just like 42, '(), or #false.
     "<SYMBOL>": ["'<NAME>"],
 
     # A name or a variable is a sequence of characters not including a space or one of the following:
@@ -437,20 +457,20 @@ RACKET_BSL_GRAMMAR = {
 }
 
 
-def render_dot(tree: language.DerivationTree) -> bool | str:
-    logging.getLogger("graphviz.backend").propagate = False
-    logging.getLogger("graphviz.files").propagate = False
+def load_racket(tree: language.DerivationTree) -> bool | str:
+    with tempfile.NamedTemporaryFile(suffix=".rk") as tmp:
+        tmp.write(str(tree).encode())
+        tmp.flush()
+        # cmd = ["racket", "-e", f'(require drracket/check-syntax) (show-content "{tmp.name}")']
+        cmd = ["racket", "-f", tmp.name]
+        process = subprocess.Popen(cmd, stderr=PIPE, stdin=PIPE)
+        (stdout, stderr) = process.communicate()
+        exit_code = process.wait()
 
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as outfile:
-        devnull = open(os.devnull, 'w')
-        orig_stderr = sys.stderr
-        sys.stderr = devnull
+        err_msg = stderr.decode("utf-8")
+        has_error = exit_code != 0 or (bool(err_msg) and "read-syntax" in err_msg)
 
-        err_message = ""
-        try:
-            graphviz.Source(str(tree)).render(outfile.name)
-        except Exception as exc:
-            err_message = str(exc)
+        if has_error:
+            print(err_msg)
 
-        sys.stderr = orig_stderr
-        return True if not err_message else err_message
+        return True if not has_error else err_msg
