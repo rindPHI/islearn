@@ -692,8 +692,7 @@ class InvariantLearner:
                                 formula,
                                 self.grammar,
                                 self.graph,
-                                {language.Constant("start", "<start>"):
-                                     ((), trie[path_to_trie_key(())])} | instantiation,
+                                {language.Constant("start", "<start>"): trie[path_to_trie_key(())]} | instantiation,
                                 trie
                             ).is_false()
                             for trie in tries):
@@ -725,7 +724,7 @@ class InvariantLearner:
                     pattern,
                     self.grammar,
                     self.graph,
-                    {language.Constant("start", "<start>"): ((), trie[path_to_trie_key(())])},
+                    {language.Constant("start", "<start>"): trie[path_to_trie_key(())]},
                     trie).is_false()
                 for trie in tries)
         }
@@ -1222,12 +1221,12 @@ class InvariantLearner:
                 indices: Set[int] = set([])
                 for trie in tries:
                     container_tries = [
-                        get_subtrie(trie, path) for path, subtree in trie.items()
+                        get_subtrie(trie, path_key) for path_key, (path, subtree) in trie.items()
                         if subtree.value == container_nonterminal]
 
                     for container_trie in container_tries:
                         num_occs = len([
-                            subtree for subtree in container_trie.values()
+                            subtree for _, subtree in container_trie.values()
                             if subtree.value == elem_nonterminal])
 
                         indices.update(list(range(1, num_occs + 1)))
@@ -1404,13 +1403,11 @@ class InvariantLearner:
         fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
         for trie in tries:
             remaining_paths: List[Tuple[str, language.DerivationTree]] = list(
-                sorted(cast(List[Tuple[str, language.DerivationTree]], list(trie.items())),
+                sorted(cast(List[Tuple[str, language.DerivationTree]], list(trie.values())),
                        key=lambda p: len(p[0])))
             handled_paths: Dict[str, Set[Path]] = {nonterminal: set([]) for nonterminal in self.grammar}
             while remaining_paths:
-                t = remaining_paths.pop(0)
-                path = trie_key_to_path(t[0])
-                tree = t[1]
+                path, tree = remaining_paths.pop(0)
                 if not is_nonterminal(tree.value):
                     continue
 
@@ -1562,9 +1559,9 @@ def approximately_evaluate_abst_for(
             sub_trie = get_subtrie(trie, in_path)
 
             new_assignments: List[Dict[language.Variable, Tuple[Path, language.DerivationTree]]] = []
-            for path_key, subtree in sub_trie.items():
+            for path, subtree in sub_trie.values():
                 if subtree.value == formula.bound_variable.n_type:
-                    new_assignments.append({formula.bound_variable: (in_path + trie_key_to_path(path_key), subtree)})
+                    new_assignments.append({formula.bound_variable: (in_path + path, subtree)})
         else:
             new_assignments = [
                 {var: (in_path + path, tree) for var, (path, tree) in new_assignment.items()}
@@ -1594,12 +1591,12 @@ def approximately_evaluate_abst_for(
 
         arg_insts = [
             arg if isinstance(arg, str)
-            else next(trie_key_to_path(path) for path, subtree in trie.items() if subtree.id == arg.id)
+            else next(path for path, subtree in trie.values() if subtree.id == arg.id)
             if isinstance(arg, language.DerivationTree)
             else assignments[arg][0]
             for arg in formula.args]
 
-        return ThreeValuedTruth.from_bool(formula.predicate.evaluate(trie.get(path_to_trie_key(())), *arg_insts))
+        return ThreeValuedTruth.from_bool(formula.predicate.evaluate(trie.get(path_to_trie_key(()))[1], *arg_insts))
     elif isinstance(formula, language.SemanticPredicateFormula):
         if any(isinstance(arg, PlaceholderVariable) for arg in formula.args):
             return ThreeValuedTruth.unknown()

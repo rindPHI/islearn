@@ -101,7 +101,7 @@ forall <expr> use_ctx in start:
             correct_property.strip(),
             map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
 
-    @pytest.mark.flaky(reruns=3, reruns_delay=2)
+    # @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_mexpr_rest(self):
         correct_property = """
 forall <internal_reference> use_ctx="<presep>{<id> use}_<postsep>" in start:
@@ -127,20 +127,20 @@ x
             for inp in raw_inputs]
 
         ##########
-        # candidates = InvariantLearner(
-        #     rest.REST_GRAMMAR,
-        #     prop,
-        #     activated_patterns={"Def-Use (reST)"},
-        #     mexpr_expansion_limit=2
-        # ).generate_candidates(
-        #     patterns_from_file()["Def-Use (reST)"],
-        #     inputs,
-        # )
-        #
-        # print(len(candidates))
-        # print("\n\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-        #
-        # return
+        candidates = InvariantLearner(
+            rest.REST_GRAMMAR,
+            prop,
+            activated_patterns={"Def-Use (reST)"},
+            mexpr_expansion_limit=2
+        ).generate_candidates(
+            patterns_from_file()["Def-Use (reST)"],
+            inputs,
+        )
+
+        print(len(candidates))
+        print("\n\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        return
         ##########
 
         result = InvariantLearner(
@@ -1064,7 +1064,7 @@ forall <ip_message> container in start:
             for inp in negative_trees
         ))
 
-    def test_racket(self):
+    def Xtest_racket(self):
         # The racket syntax check is really expensive; therefore, reduction cannot be used efficiently.
         # Also, the HTDP examples are pretty small already.
         urls = [
