@@ -22,6 +22,7 @@ from islearn.mexpr_parser.MexprParser import MexprParser
 
 NONTERMINAL_PLACEHOLDER = "<?NONTERMINAL>"
 STRING_PLACEHOLDER = "<?STRING>"
+DSTRINGS_PLACEHOLDER = "<?DSTRINGS>"
 MEXPR_PLACEHOLDER = "<?MATCHEXPR>"
 
 
@@ -49,6 +50,14 @@ class StringPlaceholderVariable(PlaceholderVariable):
 
     def __str__(self):
         return STRING_PLACEHOLDER
+
+
+@dataclass(frozen=True, eq=True, init=True)
+class DisjunctiveStringsPlaceholderVariable(PlaceholderVariable):
+    name: str
+
+    def __str__(self):
+        return DSTRINGS_PLACEHOLDER
 
 
 @dataclass(frozen=True, eq=True, init=True)
@@ -130,6 +139,9 @@ class AbstractVariableManager(VariableManager):
         if n_type == STRING_PLACEHOLDER:
             return self.variables.setdefault(name, StringPlaceholderVariable(name))
 
+        if n_type == DSTRINGS_PLACEHOLDER:
+            return self.variables.setdefault(name, DisjunctiveStringsPlaceholderVariable(name))
+
         if constr is not None and n_type:
             return self.variables.setdefault(name, constr(name, n_type))
 
@@ -159,6 +171,7 @@ class AbstractISLaEmitter(ISLaEmitter):
         self.mgr = AbstractVariableManager(grammar)
         self.next_nonterminal_string_placeholder_index = 1
         self.next_string_placeholder_index = 1
+        self.next_dstrings_placeholder_index = 1
 
     def exitPredicateArg(self, ctx: IslaLanguageParser.PredicateArgContext):
         text = parse_tree_text(ctx)
@@ -173,6 +186,10 @@ class AbstractISLaEmitter(ISLaEmitter):
             self.predicate_args[ctx] = StringPlaceholderVariable(
                 f"STRING_{self.next_string_placeholder_index}")
             self.next_string_placeholder_index += 1
+        elif text == DSTRINGS_PLACEHOLDER:
+            self.predicate_args[ctx] = StringPlaceholderVariable(
+                f"DSTRINGS_{self.next_dstrings_placeholder_index}")
+            self.next_dstrings_placeholder_index += 1
         elif text == NONTERMINAL_PLACEHOLDER:
             self.predicate_args[ctx] = NonterminalStringPlaceholderVariable(
                 f"NONTERMINAL_{self.next_nonterminal_string_placeholder_index}")
@@ -187,6 +204,13 @@ class AbstractISLaEmitter(ISLaEmitter):
         if match:
             for group_idx in range(1, 1 + len(match.groups())):
                 new_var = self.mgr.bv(self.mgr.fresh_name("STRING"), STRING_PLACEHOLDER)
+                fr, to = match.span(group_idx)
+                formula_text = formula_text[:fr] + new_var.name + formula_text[to:]
+
+        match = re.search("(" + re.escape(DSTRINGS_PLACEHOLDER) + ")", formula_text)
+        if match:
+            for group_idx in range(1, 1 + len(match.groups())):
+                new_var = self.mgr.bv(self.mgr.fresh_name("DSTRINGS"), DSTRINGS_PLACEHOLDER)
                 fr, to = match.span(group_idx)
                 formula_text = formula_text[:fr] + new_var.name + formula_text[to:]
 
@@ -268,9 +292,9 @@ class AbstractISLaUnparser(ISLaUnparser):
         result = smt_expr_to_str(formula.formula)
 
         for variable in formula.free_variables():
-            if not isinstance(variable, StringPlaceholderVariable):
-                continue
-
-            result = result.replace(variable.name, str(variable))
+            if isinstance(variable, StringPlaceholderVariable):
+                result = result.replace(variable.name, str(variable))
+            elif isinstance(variable, DisjunctiveStringsPlaceholderVariable):
+                result = result.replace(variable.name, str(variable))
 
         return [result]

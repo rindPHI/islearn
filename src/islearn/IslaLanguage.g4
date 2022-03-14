@@ -32,12 +32,13 @@ sexpr:
   | STRING            # SexprStr
   | '<?NONTERMINAL>'  # SexprNonterminalStringPh
   | '<?STRING>'       # SexprStringPh
+  | '<?DSTRINGS>'     # SexprDisjStringsPh
   | ('re.*' | 're.++' | 're.+' | 'str.++' | '=' | DIV | MUL | PLUS | MINUS | GEQ | LEQ | GT | LT)
                       # SexprOp
   | '(' op=sexpr sexpr + ')' # SepxrApp
   ;
 
-predicateArg: ID | INT | STRING | '<?NONTERMINAL>' | '<?STRING>';
+predicateArg: ID | INT | STRING | '<?NONTERMINAL>' | '<?STRING>' | '<?DSTRINGS>';
 
 STRING: '"' (ESC|.) *? '"';
 ID: ID_LETTER (ID_LETTER | DIGIT) * ;

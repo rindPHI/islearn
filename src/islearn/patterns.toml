@@ -32,6 +32,19 @@ forall <?NONTERMINAL> attribute in start:
            (= prefix_use prefix_def)))
 '''
 
+[[Def-Use]]
+
+name = "Def-Use (XML Extended)"
+constraint = '''
+forall <?NONTERMINAL> attribute in start:
+  forall <?NONTERMINAL> prefix_id="{<?MATCHEXPR(prefix_use)>}" in attribute:
+    ((= prefix_use <?DSTRINGS>) or
+      exists <?NONTERMINAL> outer_tag="{<?MATCHEXPR(cont_attribute, contained_tree)>}" in start:
+        (inside(attribute, contained_tree) and
+         exists <?NONTERMINAL> def_attribute="{<?MATCHEXPR(prefix_def)>}" in cont_attribute:
+           (= prefix_use prefix_def)))
+'''
+
 [[Types]]
 
 name = "Value Type is Date (TOML)"
