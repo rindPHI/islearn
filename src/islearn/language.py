@@ -64,7 +64,13 @@ class MexprPlaceholderVariable(PlaceholderVariable):
         )
 
     def __str__(self):
-        return MEXPR_PLACEHOLDER[:-1] + "(" + ", ".join(map(str, self.variables)) + ")>"
+        def arg_to_str(v: Variable):
+            if isinstance(v, NonterminalPlaceholderVariable):
+                return v.name
+            assert not isinstance(v, PlaceholderVariable)
+            return f"{v.n_type} {v.name}"
+
+        return MEXPR_PLACEHOLDER[:-1] + "(" + ", ".join(map(arg_to_str, self.variables)) + ")>"
 
 
 class AbstractBindExpression(language.BindExpression):
@@ -215,10 +221,17 @@ class AbstractMExprEmitter(MExprEmitter, MexprParserListener.MexprParserListener
         self.mgr = mgr
 
     def exitMatchExprPlaceholder(self, ctx: MexprParser.MatchExprPlaceholderContext):
-        ids = [parse_tree_text(id) for id in ctx.ID()]
-        phs = [cast(NonterminalPlaceholderVariable, self.mgr.bv(id, NONTERMINAL_PLACEHOLDER)) for id in ids]
+        param_defs: List[MexprParser.MexprPlaceholderParamContext] = ctx.mexprPlaceholderParam()
+        params: List[language.Variable] = []
+        for param_def in param_defs:
+            param_id = parse_tree_text(param_def.ID())
+            if param_def.varType() is not None:
+                params.append(self.mgr.bv(param_id, parse_tree_text(param_def.varType())))
+            else:
+                params.append(self.mgr.bv(param_id, NONTERMINAL_PLACEHOLDER))
+
         name = self.mgr.fresh_name("mexprPlaceholder")
-        mexpr_placeholder = MexprPlaceholderVariable(name, tuple(phs))
+        mexpr_placeholder = MexprPlaceholderVariable(name, tuple(params))
         self.mgr.variables.setdefault(name, mexpr_placeholder)
         self.result.append(mexpr_placeholder)
 

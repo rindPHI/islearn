@@ -343,11 +343,17 @@ RACKET_BSL_GRAMMAR = {
     "<start>": ["<program>"],
     "<program>": ["<def_or_exprs>"],
     "<def_or_exprs>": ["<def_or_expr><MWSS><def_or_exprs>", "<def_or_expr>"],
-    "<def_or_expr>": ["<definition>", "<expr>", "<test_case>", "<library_require>", "<COMMENT>", "<HASHDIRECTIVE>"],
+    "<def_or_expr>": [
+        "<maybe_comments><definition>",
+        "<expr>",
+        "<test_case>",
+        "<library_require>",
+        "<HASHDIRECTIVE>",
+        "<COMMENT>"
+    ],
 
     "<definition>": [
         "(<MWSS>define<MWSS>(<MWSS><name><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)",
-        "(<MWSS>define<MWSS>(<MWSS><name><MWSS>)<MWSS><expr><MWSS>)",
         "(<MWSS>define<WSS><name><MWSS><expr><MWSS>)",
         "(<MWSS>define<WSS><name><MWSS>(lambda<MWSS>(<MWSS><WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)<MWSS>)",
         "(<MWSS>define-struct<WSS><name><MWSS>(<MWSS><name><maybe_wss_names><MWSS>)<MWSS>)",

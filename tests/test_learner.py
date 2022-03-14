@@ -9,21 +9,21 @@ import urllib.request
 from typing import cast, Tuple, Set
 
 import pytest
-import scapy.all as scapy
 from fuzzingbook.Grammars import srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate, implies
 from isla.helpers import strip_ws
-from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE
+from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE, IN_TREE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
 
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
-from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES
+from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES, \
+    AbstractISLaUnparser
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
 from languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot, \
@@ -127,20 +127,20 @@ x
             for inp in raw_inputs]
 
         ##########
-        candidates = InvariantLearner(
-            rest.REST_GRAMMAR,
-            prop,
-            activated_patterns={"Def-Use (reST)"},
-            mexpr_expansion_limit=2
-        ).generate_candidates(
-            patterns_from_file()["Def-Use (reST)"],
-            inputs,
-        )
-
-        print(len(candidates))
-        print("\n\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
-
-        return
+        # candidates = InvariantLearner(
+        #     rest.REST_GRAMMAR,
+        #     prop,
+        #     activated_patterns={"Def-Use (reST)"},
+        #     mexpr_expansion_limit=2
+        # ).generate_candidates(
+        #     patterns_from_file()["Def-Use (reST)"],
+        #     inputs,
+        # )
+        #
+        # print(len(candidates))
+        # print("\n\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+        #
+        # return
         ##########
 
         result = InvariantLearner(
@@ -364,7 +364,7 @@ forall <json> container in start:
 
     # @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_alhazen_sqrt_example(self):
-        correct_property_1 = """
+        correct_property_1_a = """
 (forall <arith_expr> container in start:
    exists <function> elem in container:
      (= elem "sqrt") and
@@ -372,13 +372,29 @@ forall <arith_expr> container_0 in start:
   exists <maybe_minus> elem_0 in container_0:
     (= elem_0 "-"))"""
 
-        correct_property_2_re = re.escape("""
+        correct_property_1_b = """
+(forall <arith_expr> container in start:
+   exists <maybe_minus> elem in container:
+     (= elem "-") and
+forall <arith_expr> container_0 in start:
+  exists <function> elem_0 in container_0:
+    (= elem_0 "sqrt"))"""
+
+        correct_property_2_a_re = re.escape("""
 (forall <arith_expr> container in start:
    exists <function> elem in container:
      (= elem "sqrt") and
 forall <arith_expr> container_0 in start:
   exists <number> elem_0 in container_0:
     (<= (str.to.int elem_0) (str.to.int "-""".strip()) + r"[1-9][0-9]*" + re.escape('")))')
+
+        correct_property_2_b_re = re.escape("""
+(forall <arith_expr> container in start:
+  exists <number> elem in container:
+    (<= (str.to.int elem) (str.to.int "-""".strip()) + r"[1-9][0-9]*" + re.escape('")) ' + """
+'and forall <arith_expr> container_0 in start:
+   exists <function> elem_0 in container_0:
+     (= elem_0 "sqrt"))""")
 
         grammar = {
             "<start>": ["<arith_expr>"],
@@ -425,7 +441,7 @@ forall <arith_expr> container_0 in start:
         # return
         #############
 
-        self.assertTrue(all(evaluate(correct_property_1, tree, grammar) for tree in trees))
+        self.assertTrue(all(evaluate(correct_property_1_a, tree, grammar) for tree in trees))
 
         result = InvariantLearner(
             grammar,
@@ -447,9 +463,13 @@ forall <arith_expr> container_0 in start:
             lambda f: ISLaUnparser(f).unparse(),
             [r for r, p in result.items() if p > .0]))
 
-        self.assertIn(correct_property_1.strip(), nonzero_precision_results)
+        self.assertTrue(correct_property_1_a.strip() in nonzero_precision_results or
+                        correct_property_1_b.strip() in nonzero_precision_results)
 
-        self.assertTrue(any(re.match(correct_property_2_re, r) for r in nonzero_precision_results))
+        self.assertTrue(
+            any(re.match(correct_property_2_a_re, r) for r in nonzero_precision_results) or
+            any(re.match(correct_property_2_b_re, r) for r in nonzero_precision_results)
+        )
 
     def test_learn_from_islearn_patterns_file(self):
         correct_property_1 = """
@@ -533,19 +553,21 @@ forall <key> elem in start:
 forall <key> elem in start:
   (<= (str.len elem) (str.to.int <?STRING>))""")
 
+        expected = language.parse_isla("""
+forall <key> elem in start:
+  (<= (str.len elem) (str.to.int "11"))""", toml_grammar)
+
         result = InvariantLearner(
             toml_grammar,
             prop=None,
         )._instantiate_string_placeholders(
-            {pattern}, [dict(tree.paths())]
+            {pattern}, [tree.trie()]
         )
-
-        expected = language.parse_isla("""
-forall <key> elem in start:
-  (<= (str.len elem) (str.to.int "10"))""", toml_grammar)
 
         # print(len(result))
         # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), result)))
+
+        self.assertEqual(1, len(result))
         self.assertIn(expected, result)
 
     def test_str_len_ph_instantiations(self):
@@ -875,6 +897,7 @@ forall <icmp_message> container in start:
             implies(type_constraint, rf, ICMP_GRAMMAR) for rf in result.keys()))
 
     def test_ip_icmp_ping_request(self):
+        import scapy.all as scapy
         ip_header_constraint = parse_abstract_isla("""
 forall <header> container in start:
   exists <header_checksum> checksum in container:
@@ -1064,6 +1087,181 @@ forall <ip_message> container in start:
             for inp in negative_trees
         ))
 
+    def test_instantiate_nonterminal_placeholders_racket(self):
+        racket_code = """
+(define (point-origin-calc x y)
+  (+ (+ (+ x x) (+ y y))))""".strip()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+
+        repo = patterns_from_file()
+        learner = InvariantLearner(
+            RACKET_BSL_GRAMMAR,
+            None,
+            positive_examples={tree},
+            exclude_nonterminals={
+                "<maybe_wss_names>",
+                "<wss_exprs>",
+                "<maybe_cond_args>",
+                "<strings_mwss>",
+                "<NAME_CHAR>",
+                "<ONENINE>",
+                "<ESC_OR_NO_STRING_ENDINGS>",
+                "<ESC_OR_NO_STRING_ENDING>",
+                "<NO_STRING_ENDING>",
+                "<CHARACTER>",
+                "<DIGIT>",
+                "<LETTERORDIGIT>",
+                "<MWSS>",
+                "<WSS>",
+                "<WS>",
+                "<maybe_comments>",
+                "<COMMENT>",
+                "<HASHDIRECTIVE>",
+                "<NOBR>",
+                "<NOBRs>",
+                "<test_case>",
+                "<library_require>",
+                "<pkg>",
+                "<SYMBOL>",
+                "<NUMBER>",
+                "<DIGITS>",
+                "<MAYBE_DIGITS>",
+                "<INT>",
+                "<BOOLEAN>",
+                "<STRING>",
+                "<program>",  # TODO: Remove for evaluation
+                "<def_or_exprs>",  # TODO: Remove for evaluation
+                "<def_or_expr>",  # TODO: Remove for evaluation
+                "<cond_args>",  # TODO: Remove for evaluation
+            },
+        )
+
+        expected = parse_abstract_isla("""
+forall <expr> attribute in start:
+  forall <expr> prefix_id="{<?MATCHEXPR(<name> prefix_use)>}" in attribute:
+    ((= prefix_use <?STRING>) or
+    exists <definition> outer_tag="{<?MATCHEXPR(<WSS_NAMES> cont_attribute, <expr> contained_tree)>}" in start:
+      (inside(attribute, contained_tree) and
+      exists <NAME> def_attribute="{<?MATCHEXPR(<NAME_CHARS> prefix_def)>}" in cont_attribute:
+        (= prefix_use prefix_def)))""", RACKET_BSL_GRAMMAR)
+
+        instantiations = learner._instantiate_nonterminal_placeholders(
+            next(iter(repo["Def-Use (XML)"])),
+            create_input_reachability_relation([tree]))
+
+        # print(AbstractISLaUnparser(expected).unparse())
+        # print(len(instantiations))
+        # print("\n".join(map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations)))
+
+        self.assertIn(
+            AbstractISLaUnparser(expected).unparse(),
+            map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations))
+
+    def test_instantiate_string_placeholders_racket(self):
+        property = """
+forall <expr> attribute in start:
+  forall <expr> prefix_id="<maybe_comments><MWSS>{<name> prefix_use}" in attribute:
+    ((= prefix_use <?STRING>) or
+      exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+        (inside(attribute, contained_tree) and
+         exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
+           (= prefix_use prefix_def)))"""
+
+        expected = """
+forall <expr> attribute in start:
+  forall <expr> prefix_id="<maybe_comments><MWSS>{<name> prefix_use}" in attribute:
+    ((= prefix_use "+") or
+      exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+        (inside(attribute, contained_tree) and
+         exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
+           (= prefix_use prefix_def)))"""
+
+        racket_code = """
+(define (point-origin-calc x y)
+  (+ (+ (+ x x) (+ y y))))""".strip()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+
+        instantiations = InvariantLearner(
+            RACKET_BSL_GRAMMAR,
+        )._instantiate_string_placeholders(
+            {parse_abstract_isla(property, RACKET_BSL_GRAMMAR)},
+            [tree.trie()])
+
+        print(len(instantiations))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), instantiations)))
+
+        self.assertIn(parse_abstract_isla(expected, RACKET_BSL_GRAMMAR), instantiations)
+
+    def test_simplified_racket_xml_defuse_prop_get_candidates(self):
+        def prop(tree: language.DerivationTree) -> bool:
+            return load_racket(tree) is True
+
+        racket_code = """
+(define (point-origin-calc x y)
+  (+ (+ (+ x x) (+ y y))))""".strip()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+
+        # This is an instantiation of the XML predicate
+        expected_defuse_property = """
+forall <expr> attribute in start:
+  forall <expr> prefix_id="<maybe_comments><MWSS>{<name> prefix_use}" in attribute:
+    ((= prefix_use "+") or
+      exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+        (inside(attribute, contained_tree) and
+         exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
+           (= prefix_use prefix_def)))"""
+
+        repo = patterns_from_file()
+        candidates = InvariantLearner(
+            RACKET_BSL_GRAMMAR,
+            prop=None,
+            positive_examples={tree},
+            exclude_nonterminals={
+                "<maybe_wss_names>",
+                "<wss_exprs>",
+                "<maybe_cond_args>",
+                "<strings_mwss>",
+                "<NAME_CHAR>",
+                "<ONENINE>",
+                "<ESC_OR_NO_STRING_ENDINGS>",
+                "<ESC_OR_NO_STRING_ENDING>",
+                "<NO_STRING_ENDING>",
+                "<CHARACTER>",
+                "<DIGIT>",
+                "<LETTERORDIGIT>",
+                "<MWSS>",
+                "<WSS>",
+                "<WS>",
+                "<maybe_comments>",
+                "<COMMENT>",
+                "<HASHDIRECTIVE>",
+                "<NOBR>",
+                "<NOBRs>",
+                "<test_case>",
+                "<library_require>",
+                "<pkg>",
+                "<SYMBOL>",
+                "<NUMBER>",
+                "<DIGITS>",
+                "<MAYBE_DIGITS>",
+                "<INT>",
+                "<BOOLEAN>",
+                "<STRING>",
+                "<program>",  # TODO: Remove for evaluation
+                "<def_or_exprs>",  # TODO: Remove for evaluation
+                "<def_or_expr>",  # TODO: Remove for evaluation
+                "<cond_args>",  # TODO: Remove for evaluation
+            },
+        ).generate_candidates(
+            repo["Def-Use (XML)"],
+            {tree}
+        )
+
+        # print(len(candidates))
+        # print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        self.assertIn(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), candidates)
+
     def Xtest_racket(self):
         # The racket syntax check is really expensive; therefore, reduction cannot be used efficiently.
         # Also, the HTDP examples are pretty small already.
@@ -1086,20 +1284,43 @@ forall <ip_message> container in start:
         def prop(tree: language.DerivationTree) -> bool:
             return load_racket(tree) is True
 
+        racket_code = """
+(define (point-origin-calc x y)
+  (sqrt (+ (* x x)
+           (* y y))))""".strip()
+
+        positive_trees = [
+            language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])]
+
+        # This is an instantiation of the XML predicate
+        expected_defuse_property = """
+forall <expr> attribute in start:
+  forall <expr> prefix_id="<maybe_comments><MWSS>{<name> prefix_use}" in attribute:
+    ((= prefix_use "+") or
+      exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+        (inside(attribute, contained_tree) and
+         exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
+           (= prefix_use prefix_def)))"""
+
+        # self.assertTrue(evaluate(
+        #     parse_isla(expected_defuse_property, structural_predicates={IN_TREE_PREDICATE}),
+        #     positive_trees[0],
+        #     RACKET_BSL_GRAMMAR).is_true())
+        #
+        # return
+
         ##############
 
         repo = patterns_from_file()
         candidates = InvariantLearner(
             RACKET_BSL_GRAMMAR,
             prop,
-            positive_examples={positive_trees[8]},
+            positive_examples={positive_trees[0]},  # 8
             exclude_nonterminals={
-                "<WSS_NAMES>",
                 "<maybe_wss_names>",
                 "<wss_exprs>",
                 "<maybe_cond_args>",
                 "<strings_mwss>",
-                "<NAME_CHARS>",
                 "<NAME_CHAR>",
                 "<ONENINE>",
                 "<ESC_OR_NO_STRING_ENDINGS>",
@@ -1116,10 +1337,24 @@ forall <ip_message> container in start:
                 "<HASHDIRECTIVE>",
                 "<NOBR>",
                 "<NOBRs>",
+                "<test_case>",
+                "<library_require>",
+                "<pkg>",
+                "<SYMBOL>",
+                "<NUMBER>",
+                "<DIGITS>",
+                "<MAYBE_DIGITS>",
+                "<INT>",
+                "<BOOLEAN>",
+                "<STRING>",
+                "<program>",  # TODO: Remove for evaluation
+                "<def_or_exprs>",  # TODO: Remove for evaluation
+                "<def_or_expr>",  # TODO: Remove for evaluation
+                "<cond_args>",  # TODO: Remove for evaluation
             },
         ).generate_candidates(
-            repo["Def-Use (C)"],
-            {positive_trees[8]}
+            repo["Def-Use (XML)"],
+            {positive_trees[0]}
         )
 
         print(len(candidates))

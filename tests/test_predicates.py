@@ -97,7 +97,7 @@ forall <start> container in start:
                 ICMP_GRAMMAR,
                 gg.GrammarGraph.from_grammar(ICMP_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), wrong_ping_request_message)},
-                dict(wrong_ping_request_message.paths())).is_false())
+                wrong_ping_request_message.trie()).is_false())
 
     def test_checksum_random_ping_packet(self):
         checksum_constraint = parse_isla("""

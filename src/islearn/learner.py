@@ -6,6 +6,7 @@ import logging
 import os.path
 import pkgutil
 import re
+import sys
 from abc import ABC
 from functools import lru_cache
 from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
@@ -666,45 +667,25 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
                          len(pattern_insts_without_nonterminal_string_placeholders))
 
-            pattern_insts_without_nonterminal_string_placeholders = self._filter_partial_instantiations(
-                pattern_insts_without_nonterminal_string_placeholders, tries)
-            logger.debug("%d instantiations remain after filtering",
-                         len(pattern_insts_without_nonterminal_string_placeholders))
+            if (pattern_insts_without_special_string_placeholders !=
+                    pattern_insts_without_nonterminal_string_placeholders):
+                pattern_insts_without_nonterminal_string_placeholders = self._filter_partial_instantiations(
+                    pattern_insts_without_nonterminal_string_placeholders, tries)
+                logger.debug("%d instantiations remain after filtering",
+                             len(pattern_insts_without_nonterminal_string_placeholders))
 
             pattern_insts_without_nonterminal_string_placeholders = self._apply_filters(
                 pattern_insts_without_nonterminal_string_placeholders, filters, 1, tries)
 
             # 5. String placeholders
-            string_placeholder_insts = self._get_string_placeholder_instantiations(
-                pattern_insts_without_nonterminal_string_placeholders, tries)
+            if not any(isinstance(ph, StringPlaceholderVariable) for ph in get_placeholders(pattern)):
+                pattern_insts_without_string_placeholders = pattern_insts_without_nonterminal_string_placeholders
+            else:
+                pattern_insts_without_string_placeholders = self._instantiate_string_placeholders(
+                    pattern_insts_without_nonterminal_string_placeholders, tries)
 
-            pattern_insts_without_string_placeholders: Set[language.Formula] = set([])
-            for formula in string_placeholder_insts:
-                if not string_placeholder_insts[formula]:
-                    pattern_insts_without_string_placeholders.add(formula)
-                    continue
-
-                instantiations: List[Dict[StringPlaceholderVariable, str]] = dict_of_lists_to_list_of_dicts(
-                    string_placeholder_insts[formula])
-                for instantiation in instantiations:
-                    if any(
-                            not approximately_evaluate_abst_for(
-                                formula,
-                                self.grammar,
-                                self.graph,
-                                {language.Constant("start", "<start>"): trie[path_to_trie_key(())]} | instantiation,
-                                trie
-                            ).is_false()
-                            for trie in tries):
-                        instantiated_formula = formula
-                        for ph, inst in instantiation.items():
-                            instantiated_formula = language.replace_formula(
-                                instantiated_formula,
-                                functools.partial(substitute_string_placeholder, ph, inst))
-                        pattern_insts_without_string_placeholders.add(instantiated_formula)
-
-            logger.debug("Found %d instantiations of pattern after instantiating string placeholders",
-                         len(pattern_insts_without_string_placeholders))
+                logger.debug("Found %d instantiations of pattern after instantiating string placeholders",
+                             len(pattern_insts_without_string_placeholders))
 
             assert all(not get_placeholders(candidate)
                        for candidate in pattern_insts_without_string_placeholders)
@@ -787,7 +768,13 @@ class InvariantLearner:
         pe_before = len(self.positive_examples)
         ne_before = len(self.negative_examples)
         mutation_fuzzer = MutationFuzzer(self.grammar, self.positive_examples, self.prop, k=self.k)
-        for inp in mutation_fuzzer.run(num_iterations=50, alpha=.1, yield_negative=True):
+        for inp in mutation_fuzzer.run(
+                num_iterations=min(
+                    30,
+                    max(self.target_number_positive_samples - pe_before, 30),
+                    max(self.target_number_negative_samples - ne_before, 30)
+                ),
+                alpha=.1, yield_negative=True):
             if self.prop(inp) and not tree_in(inp, self.positive_examples):
                 self.positive_examples.append(inp)
             elif not self.prop(inp) and not tree_in(inp, self.negative_examples):
@@ -1283,97 +1270,33 @@ class InvariantLearner:
     def _instantiate_string_placeholders(
             self,
             inst_patterns: Set[language.Formula],
-            inputs_subtrees: List[Dict[Path, language.DerivationTree]]) -> Set[language.Formula]:
-
-        if all(not isinstance(placeholder, StringPlaceholderVariable)
-               for inst_pattern in inst_patterns
-               for placeholder in get_placeholders(inst_pattern)):
-            return inst_patterns
-
-        # NOTE: To reduce the search space, we also exclude fragments for nonterminals which
-        #       have more than `trivial_fragments_exclusion_threshold` terminal children.
-        #       This is rather arbitrary, but avoids finding all kinds of spurious invariants
-        #       like "there is an 'e' in the text" which are likely to hold any many cases.
-        #       10 is the length of a typical <DIGIT> nonterminal expansion set, which
-        #       is why those nonterminal fragments would not be pruned.
-        trivial_fragments_exclusion_threshold = 10
-
-        many_trivial_terminal_parents: Set[str] = set([])
-        for nonterminal in self.grammar:
-            reachable = self._reachable_characters(nonterminal)
-            if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
-                many_trivial_terminal_parents.add(nonterminal)
-
-        fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
-        for inp in inputs_subtrees:
-            remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(
-                sorted(cast(List[Tuple[Path, language.DerivationTree]], list(inp.items())),
-                       key=lambda p: len(p[0])))
-            handled_paths: Dict[str, Set[Path]] = {nonterminal: set([]) for nonterminal in self.grammar}
-            while remaining_paths:
-                path, tree = remaining_paths.pop(0)
-                if not is_nonterminal(tree.value):
-                    continue
-
-                single_child_ancestors: List[language.DerivationTree] = [tree]
-                while len(single_child_ancestors[-1].children) == 1:
-                    single_child_ancestors.append(single_child_ancestors[-1].children[0])
-
-                if any(child.value in many_trivial_terminal_parents for child in single_child_ancestors):
-                    continue
-
-                tree_string = str(tree)
-                if not tree_string:
-                    continue
-
-                # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
-                #       "1234", don't include the <digits> "34". This might lead
-                #       to imprecision, but otherwise the search room tends to explode.
-                if any(len(opath) < len(path) and opath == path[:len(opath)]
-                       for opath in handled_paths[tree.value]):
-                    continue
-
-                handled_paths[tree.value].add(path)
-                fragments[tree.value].add(tree_string)
-                fragments[tree.value].add(str(len(tree_string)))
-
-                # For strings representing floats, we also include the rounded Integers.
-                if is_float(tree_string) and not is_int(tree_string):
-                    fragments[tree.value].add(str(int(float(tree_string))))
-                    fragments[tree.value].add(str(int(float(tree_string)) + 1))
-
-        logger.debug(
-            "Extracted %d language fragments from sample inputs",
-            sum(len(value) for value in fragments.values()))
-
+            tries: List[datrie.Trie]):
         result: Set[language.Formula] = set([])
-        for inst_pattern in inst_patterns:
-            def replace_placeholder_by_string(subformula: language.Formula) -> Optional[Iterable[language.Formula]]:
-                if (not isinstance(subformula, language.SemanticPredicateFormula) and
-                        not isinstance(subformula, language.SemanticPredicateFormula) and
-                        not isinstance(subformula, language.SMTFormula)):
-                    return None
+        string_placeholder_insts = self._get_string_placeholder_instantiations(inst_patterns, tries)
 
-                if not any(isinstance(arg, StringPlaceholderVariable) for arg in subformula.free_variables()):
-                    return None
+        for formula in string_placeholder_insts:
+            if not string_placeholder_insts[formula]:
+                result.add(formula)
+                continue
 
-                non_ph_vars = {v for v in subformula.free_variables() if not isinstance(v, PlaceholderVariable)}
-
-                insts: Set[str] = set(functools.reduce(
-                    set.__or__, [fragments.get(var.n_type, set([])) for var in non_ph_vars]))
-
-                ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariable)}
-                sub_result: Set[language.Formula] = {subformula}
-                for ph in ph_vars:
-                    sub_result = {
-                        language.replace_formula(f, functools.partial(substitute_string_placeholder, ph, inst))
-                        for f in set(sub_result)
-                        for inst in insts
-                    }
-
-                return sub_result
-
-            result.update(replace_formula_by_formulas(inst_pattern, replace_placeholder_by_string))
+            instantiations: List[Dict[StringPlaceholderVariable, str]] = dict_of_lists_to_list_of_dicts(
+                string_placeholder_insts[formula])
+            for instantiation in instantiations:
+                if any(
+                        not approximately_evaluate_abst_for(
+                            formula,
+                            self.grammar,
+                            self.graph,
+                            {language.Constant("start", "<start>"): trie[path_to_trie_key(())]} | instantiation,
+                            trie
+                        ).is_false()
+                        for trie in tries):
+                    instantiated_formula = formula
+                    for ph, inst in instantiation.items():
+                        instantiated_formula = language.replace_formula(
+                            instantiated_formula,
+                            functools.partial(substitute_string_placeholder, ph, inst))
+                    result.add(instantiated_formula)
 
         return result
 
@@ -1394,29 +1317,29 @@ class InvariantLearner:
         #       is why those nonterminal fragments would not be pruned.
         trivial_fragments_exclusion_threshold = 10
 
-        many_trivial_terminal_parents: Set[str] = set([])
-        for nonterminal in self.grammar:
-            reachable = self._reachable_characters(nonterminal)
-            if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
-                many_trivial_terminal_parents.add(nonterminal)
+        # many_trivial_terminal_parents: Set[str] = set([])
+        # for nonterminal in self.grammar:
+        #     reachable = self._reachable_characters(nonterminal)
+        #     if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
+        #         many_trivial_terminal_parents.add(nonterminal)
 
         fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
         for trie in tries:
-            remaining_paths: List[Tuple[str, language.DerivationTree]] = list(
-                sorted(cast(List[Tuple[str, language.DerivationTree]], list(trie.values())),
-                       key=lambda p: len(p[0])))
+            remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(
+                sorted(list(trie.values()), key=lambda p: len(p[0])))
+
             handled_paths: Dict[str, Set[Path]] = {nonterminal: set([]) for nonterminal in self.grammar}
             while remaining_paths:
                 path, tree = remaining_paths.pop(0)
                 if not is_nonterminal(tree.value):
                     continue
 
-                single_child_ancestors: List[language.DerivationTree] = [tree]
-                while len(single_child_ancestors[-1].children) == 1:
-                    single_child_ancestors.append(single_child_ancestors[-1].children[0])
-
-                if any(child.value in many_trivial_terminal_parents for child in single_child_ancestors):
-                    continue
+                # single_child_ancestors: List[language.DerivationTree] = [tree]
+                # while len(single_child_ancestors[-1].children) == 1:
+                #     single_child_ancestors.append(single_child_ancestors[-1].children[0])
+                #
+                # if any(child.value in many_trivial_terminal_parents for child in single_child_ancestors):
+                #     continue
 
                 tree_string = str(tree)
                 if not tree_string:
@@ -1424,7 +1347,7 @@ class InvariantLearner:
 
                 # NOTE: We exclude substrings from fragments; e.g., if we have a <digits>
                 #       "1234", don't include the <digits> "34". This might lead
-                #       to imprecision, but otherwise the search room tends to explode.
+                #       to imprecision, but otherwise the search space tends to explode.
                 if any(len(opath) < len(path) and opath == path[:len(opath)]
                        for opath in handled_paths[tree.value]):
                     continue

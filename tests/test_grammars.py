@@ -77,7 +77,7 @@ class TestGrammars(unittest.TestCase):
             self.assertTrue(PEGParser(IPv4_GRAMMAR).parse(ip_packet_hex_dump + " "))
 
     def test_racket_bsl_grammar(self):
-        # Load all Racket BSL examples from the How to Design Programs repository.
+        # Load all Racket BSL examples from a How to Design Programs exercise solutions repository.
         urls = [
             f"https://github.com/johnamata/compsci/raw/"
             f"cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/{str(i).rjust(3, '0')}.rkt"
@@ -95,9 +95,31 @@ class TestGrammars(unittest.TestCase):
                 racket_code = racket_code.strip()
 
                 try:
-                    language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+                    tree = language.DerivationTree.from_parse_tree(
+                        list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+                    if "(define" in racket_code:
+                        self.assertTrue(
+                            tree.filter(lambda t: t.value == "<definition>"),
+                            f"<definition> node expected in URL {url}, program\n{racket_code}"
+                        )
                 except SyntaxError as e:
                     self.fail(f"Failed to parse URL {url} ({e}), file:\n\n{racket_code}")
+
+    def test_racket_bsl_grammar_2(self):
+        racket_code = """
+#lang htdp/bsl
+
+;;Define a function that consumes two numbers, x and y, and that computes the distance of point (x,y)
+;; to the origin.
+
+(define (point-origin-calc x y)
+  (sqrt (+ (* x x)
+           (* y y))))""".strip()
+
+        parser = PEGParser(RACKET_BSL_GRAMMAR, log=True)
+
+        tree = language.DerivationTree.from_parse_tree(list(parser.parse(racket_code))[0])
+        self.assertTrue(tree.filter(lambda t: t.value == "<definition>"))
 
 
 if __name__ == '__main__':

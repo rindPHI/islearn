@@ -69,7 +69,7 @@ class MutationFuzzer:
         mutations = 0
         while mutations < num_mutations:
             maybe_result = self.mutate(curr_inp)
-            if maybe_result:
+            if maybe_result is not None:
                 curr_inp = maybe_result
                 mutations += 1
         return curr_inp
@@ -88,7 +88,7 @@ class MutationFuzzer:
                 del mutators[mutator]
 
                 result = mutator(inp, path)
-                if result:
+                if result is not None:
                     return result
 
         return None
