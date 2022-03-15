@@ -319,7 +319,7 @@ DOT_GRAMMAR = {
 }
 
 
-def render_dot(tree: language.DerivationTree) -> bool | str:
+def render_dot(inp: language.DerivationTree | str) -> bool | str:
     logging.getLogger("graphviz.backend").propagate = False
     logging.getLogger("graphviz.files").propagate = False
 
@@ -330,7 +330,7 @@ def render_dot(tree: language.DerivationTree) -> bool | str:
 
         err_message = ""
         try:
-            graphviz.Source(str(tree)).render(outfile.name)
+            graphviz.Source(str(inp) if isinstance(inp, language.DerivationTree) else inp).render(outfile.name)
         except Exception as exc:
             err_message = str(exc)
 

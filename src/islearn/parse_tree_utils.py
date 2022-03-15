@@ -1,12 +1,45 @@
 import logging
 import math
-from typing import List, Callable, Tuple, Generator, Optional
+from typing import List, Callable, Tuple, Generator, Optional, Any, Sequence, TypeVar, Dict, cast
 
-from isla.helpers import is_nonterminal
-from isla.type_defs import ParseTree, Path, CanonicalGrammar
+import datrie
+from isla.helpers import is_nonterminal, mk_subtree_trie, path_to_trie_key
+from isla.type_defs import Path, CanonicalGrammar
+
+T = TypeVar("T")
+S = TypeVar("S")
+Tree = Tuple[T, Optional[List['Tree[T]']]]
+DictTree = Dict[T, 'DictTree']
 
 
-def get_subtree(tree: ParseTree, path: Path) -> ParseTree:
+def dict_tree_from_paths(paths: Sequence[Sequence[T]]) -> DictTree[S]:
+    def add_to_tree(root: DictTree, branch: Sequence[T]):
+        if not branch:
+            return
+        if branch[0] not in root:
+            root[branch[0]] = {}
+        add_to_tree(root[branch[0]], branch[1:])
+
+    tree: DictTree = {}
+    for path in paths:
+        add_to_tree(tree, path)
+
+    assert len(tree) == 1  # Rooted tree
+
+    return tree
+
+
+def tree_from_paths(paths: Sequence[Sequence[T]]) -> Tree[S]:
+    return dict_tree_to_tree(dict_tree_from_paths(paths))
+
+
+def dict_tree_to_tree(tree: DictTree[T]) -> Tree[T]:
+    assert len(tree) == 1  # Rooted tree
+    label: T = next(iter(tree))
+    return label, [dict_tree_to_tree(child) for child in [{t[0]: t[1]} for t in tree[label].items()]]
+
+
+def get_subtree(tree: Tree[T], path: Path) -> Tree[T]:
     """Access a subtree based on `path` (a list of children numbers)"""
     curr_node = tree
     while path:
@@ -17,11 +50,11 @@ def get_subtree(tree: ParseTree, path: Path) -> ParseTree:
 
 
 def replace_path(
-        tree: ParseTree,
+        tree: Tree[T],
         path: Path,
-        replacement_tree: ParseTree) -> ParseTree:
+        replacement_tree: Tree[T]) -> Tree[T]:
     """Returns tree where replacement_tree has been inserted at `path` instead of the original subtree"""
-    stack: List[ParseTree] = [tree]
+    stack: List[Tree[T]] = [tree]
     for path_elem in path:
         stack.append(stack[-1][1][path_elem])
 
@@ -42,10 +75,10 @@ def replace_path(
 
 
 def filter_tree(
-        tree: ParseTree,
-        f: Callable[[ParseTree], bool],
-        enforce_unique: bool = False) -> List[Tuple[Path, ParseTree]]:
-    result: List[Tuple[Path, ParseTree]] = []
+        tree: Tree,
+        f: Callable[[Tree], bool],
+        enforce_unique: bool = False) -> List[Tuple[Path, Tree]]:
+    result: List[Tuple[Path, Tree]] = []
 
     for path, subtree in tree_paths(tree):
         if f(subtree):
@@ -62,13 +95,13 @@ TRAVERSE_POSTORDER = 1
 
 
 def traverse_tree(
-        tree: ParseTree,
-        action: Callable[[Path, ParseTree], None],
-        abort_condition: Callable[[Path, ParseTree], bool] = lambda p, n: False,
+        tree: Tree[T],
+        action: Callable[[Path, Tree[T]], None],
+        abort_condition: Callable[[Path, Tree[T]], bool] = lambda p, n: False,
         kind: int = TRAVERSE_PREORDER,
         reverse: bool = False) -> None:
-    stack_1: List[Tuple[Path, ParseTree]] = [((), tree)]
-    stack_2: List[Tuple[Path, ParseTree]] = []
+    stack_1: List[Tuple[Path, Tree[T]]] = [((), tree)]
+    stack_2: List[Tuple[Path, Tree[T]]] = []
 
     if kind == TRAVERSE_PREORDER:
         reverse = not reverse
@@ -97,16 +130,41 @@ def traverse_tree(
             action(*stack_2.pop())
 
 
-def tree_paths(tree: ParseTree) -> List[Tuple[Path, ParseTree]]:
+def tree_paths(tree: Tree[T]) -> List[Tuple[Path, Tree[T]]]:
     def action(path, node):
         result.append((path, node))
 
-    result: List[Tuple[Path, ParseTree]] = []
+    result: List[Tuple[Path, Tree[T]]] = []
     traverse_tree(tree, action, kind=TRAVERSE_PREORDER)
     return result
 
 
-def tree_to_string(tree: ParseTree, show_open_leaves: bool = False) -> str:
+def trie_from_parse_tree(tree: Tree) -> datrie.Trie:
+    pass
+    trie = mk_subtree_trie()  # Works for up to 30 children of a node
+    for path, subtree in tree_paths(tree):
+        trie[path_to_trie_key(path)] = (path, subtree)
+    return trie
+
+
+def next_trie_key(trie: datrie.Trie, path: Path | str) -> Optional[str]:
+    if isinstance(path, tuple):
+        path = path_to_trie_key(path)
+
+    suffixes = tuple(filter(None, trie.suffixes(path)))
+    if suffixes:
+        return path + suffixes[0]
+    else:
+        prefixes = reversed(trie.prefixes(path))
+        for prefix in prefixes:
+            maybe_next_key = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+            if trie.keys(maybe_next_key):
+                return maybe_next_key
+
+        return None
+
+
+def tree_to_string(tree: Tree, show_open_leaves: bool = False) -> str:
     result = []
     stack = [tree]
 
@@ -127,19 +185,19 @@ def tree_to_string(tree: ParseTree, show_open_leaves: bool = False) -> str:
     return ''.join(result)
 
 
-def open_leaves(tree: ParseTree) -> Generator[Tuple[Path, ParseTree], None, None]:
+def open_leaves(tree: Tree) -> Generator[Tuple[Path, Tree], None, None]:
     return ((path, sub_tree) for path, sub_tree in tree_paths(tree) if sub_tree[1] is None)
 
 
-def tree_leaves(tree: ParseTree) -> Generator[Tuple[Path, ParseTree], None, None]:
+def tree_leaves(tree: Tree) -> Generator[Tuple[Path, Tree], None, None]:
     return ((path, sub_tree) for path, sub_tree in tree_paths(tree) if not sub_tree[1])
 
 
 def expand_tree(
-        tree: ParseTree,
+        tree: Tree,
         canonical_grammar: CanonicalGrammar,
         limit: Optional[int] = None,
-        expand_beyond_nonterminals: bool = False) -> List[ParseTree]:
+        expand_beyond_nonterminals: bool = False) -> List[Tree]:
     nonterminal_expansions = {
         (leaf_path, leaf_node): [
             [(child, None if is_nonterminal(child) else [])
@@ -150,11 +208,17 @@ def expand_tree(
         for leaf_path, leaf_node in open_leaves(tree)
     }
 
-    result: List[ParseTree] = [tree]
+    if all(not expansion for expansion in nonterminal_expansions.values()):
+        return []
+
+    result: List[Tree] = [tree]
     for (leaf_path, leaf_node), expansions in nonterminal_expansions.items():
         previous_result = result
         result = []
         for t in previous_result:
+            if not expansions:
+                result.append(t)
+
             for expansion in expansions:
                 result.append(replace_path(
                     t,
@@ -168,7 +232,7 @@ def expand_tree(
         if limit and len(result) >= limit:
             break
 
-    assert ((limit and len(result) == limit) or
-            len(result) == math.prod(len(values) for values in nonterminal_expansions.values()))
+    # assert ((limit and len(result) == limit) or
+    #         len(result) == math.prod(len(values) for values in nonterminal_expansions.values()))
 
     return result

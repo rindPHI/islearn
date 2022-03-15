@@ -39,7 +39,8 @@ from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable
     StringPlaceholderVariableTypes
 from islearn.mutation import MutationFuzzer
 from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree, tree_leaves, \
-    get_subtree
+    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, dict_tree_from_paths, dict_tree_to_tree, \
+    tree_from_paths, Tree, traverse_tree
 from islearn.reducer import InputReducer
 
 STANDARD_PATTERNS_REPO = "patterns.toml"
@@ -238,7 +239,7 @@ class InvariantLearner:
             target_number_positive_samples: int = 10,
             target_number_negative_samples: int = 10,
             target_number_positive_samples_for_learning: int = 10,
-            mexpr_expansion_limit: int = 5,
+            mexpr_expansion_limit: int = 1,
             min_recall: float = .9,
             min_precision: float = .6,
             max_disjunction_size: int = 1,
@@ -309,7 +310,7 @@ class InvariantLearner:
                 else parse_abstract_isla(pattern, grammar)
                 for pattern in patterns]
 
-    def learn_invariants(self, ensure_unique_var_names: bool = True) -> Dict[language.Formula, float]:
+    def learn_invariants(self, ensure_unique_var_names: bool = True) -> Dict[language.Formula, Tuple[float, float]]:
         if self.prop and self.do_generate_more_inputs:
             self._generate_more_inputs()
             assert len(self.positive_examples) > 0, "Cannot learn without any positive examples!"
@@ -373,9 +374,9 @@ class InvariantLearner:
         candidates = self.generate_candidates(self.patterns, self.positive_examples_for_learning)
         logger.info("Found %d invariant candidates.", len(candidates))
 
-        # logger.debug(
-        #     "Candidates:\n%s",
-        #     "\n\n".join([language.ISLaUnparser(candidate).unparse() for candidate in candidates]))
+        logger.debug(
+            "Candidates:\n%s",
+            "\n\n".join([language.ISLaUnparser(candidate).unparse() for candidate in candidates]))
 
         logger.info("Filtering invariants.")
 
@@ -539,11 +540,16 @@ class InvariantLearner:
         #            if row.eval_result() == 1)
 
         if not self.negative_examples:
+            # TODO: Enforce unique names, sort
             if ensure_unique_var_names:
                 invariants = sorted(list(map(ensure_unique_bound_variables, invariants)), key=lambda inv: len(inv))
             else:
                 invariants = sorted(list(invariants), key=lambda inv: len(inv))
-            return {inv: 1.0 for inv in invariants}
+            return {
+                row.formula: (1.0, row.eval_result())
+                for row in recall_truth_table
+                if row.eval_result() >= self.min_recall
+            }
 
         indices_to_remove = list(reversed([
             idx for idx, row in enumerate(recall_truth_table)
@@ -557,6 +563,7 @@ class InvariantLearner:
         conjunctive_precision_truthtable = copy.copy(precision_truth_table)
         for level in range(2, self.max_conjunction_size + 1):
             logger.debug(f"Conjunction size: {level}")
+            assert len(recall_truth_table) == len(conjunctive_precision_truthtable)
             for rows_with_indices in itertools.combinations(enumerate(precision_truth_table), level):
                 precision_table_rows = [row for (_, row) in rows_with_indices]
 
@@ -576,6 +583,10 @@ class InvariantLearner:
 
                 conjunctive_precision_truthtable.append(conjunction)
 
+                recall_table_rows = [recall_truth_table[idx] for idx, _ in rows_with_indices]
+                conjunction = functools.reduce(TruthTableRow.__and__, recall_table_rows)
+                recall_truth_table.append(conjunction)
+
         precision_truth_table = conjunctive_precision_truthtable
 
         # assert all(evaluate(row.formula, inp, self.grammar).is_false()
@@ -583,22 +594,23 @@ class InvariantLearner:
         #            for row in precision_truth_table
         #            if row.eval_result() == 0)
 
-        result: Dict[language.Formula, float] = {
-            row.formula if not ensure_unique_var_names
-            else language.ensure_unique_bound_variables(row.formula):
-                1 - row.eval_result()
-            for row in precision_truth_table
-            if (1 - row.eval_result() >= self.min_precision)
+        result: Dict[language.Formula, Tuple[float, float]] = {
+            precision_row.formula if not ensure_unique_var_names
+            else language.ensure_unique_bound_variables(precision_row.formula):
+                (1 - precision_row.eval_result(), recall_truth_table[idx].eval_result())
+            for idx, precision_row in enumerate(precision_truth_table)
+            if (1 - precision_row.eval_result() >= self.min_precision and
+                recall_truth_table[idx].eval_result() >= self.min_recall)
         }
 
         logger.info(
             "Found %d invariants with precision >= %d%%.",
-            len([p for p in result.values() if p >= self.min_precision]),
+            len([p for p in result.values() if p[0] >= self.min_precision]),
             int(self.min_precision * 100),
         )
 
         return dict(
-            cast(List[Tuple[language.Formula, float]],
+            cast(List[Tuple[language.Formula, Tuple[float, float]]],
                  sorted(result.items(),
                         key=lambda p: (p[1], -len(p[0])),
                         reverse=True)))
@@ -657,14 +669,18 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern after instantiating special predicate string placeholders",
                          len(pattern_insts_without_special_string_placeholders))
 
-            pattern_insts_without_special_string_placeholders = self._filter_partial_instantiations(
-                pattern_insts_without_special_string_placeholders, tries)
-            logger.debug("%d instantiations remain after filtering",
-                         len(pattern_insts_without_special_string_placeholders))
+            if pattern_insts_without_special_string_placeholders != pattern_insts_without_mexpr_placeholders:
+                pattern_insts_without_special_string_placeholders = self._filter_partial_instantiations(
+                    pattern_insts_without_special_string_placeholders, tries)
+                logger.debug("%d instantiations remain after filtering",
+                             len(pattern_insts_without_special_string_placeholders))
 
             # 4. Nonterminal-String placeholders
             pattern_insts_without_nonterminal_string_placeholders = self._instantiate_nonterminal_string_placeholders(
                 pattern_insts_without_special_string_placeholders)
+
+            pattern_insts_without_nonterminal_string_placeholders = self._apply_filters(
+                pattern_insts_without_nonterminal_string_placeholders, filters, 1, tries)
 
             logger.debug("Found %d instantiations of pattern after instantiating nonterminal string placeholders",
                          len(pattern_insts_without_nonterminal_string_placeholders))
@@ -676,11 +692,8 @@ class InvariantLearner:
                 logger.debug("%d instantiations remain after filtering",
                              len(pattern_insts_without_nonterminal_string_placeholders))
 
-            pattern_insts_without_nonterminal_string_placeholders = self._apply_filters(
-                pattern_insts_without_nonterminal_string_placeholders, filters, 1, tries)
-
             # 5. String placeholders
-            if not any(isinstance(ph, StringPlaceholderVariable) for ph in get_placeholders(pattern)):
+            if not any(isinstance(ph, StringPlaceholderVariableTypes) for ph in get_placeholders(pattern)):
                 pattern_insts_without_string_placeholders = pattern_insts_without_nonterminal_string_placeholders
             else:
                 pattern_insts_without_string_placeholders = self._instantiate_string_placeholders(
@@ -700,17 +713,25 @@ class InvariantLearner:
             self,
             formulas: Iterable[language.Formula],
             tries: Iterable[datrie.Trie]) -> Set[language.Formula]:
-        return {
-            pattern for pattern in formulas
-            if any(
-                not approximately_evaluate_abst_for(
-                    pattern,
-                    self.grammar,
-                    self.graph,
-                    {language.Constant("start", "<start>"): trie[path_to_trie_key(())]},
-                    trie).is_false()
-                for trie in tries)
-        }
+        result: Set[language.Formula] = set()
+
+        remaining_formulas = list(formulas)
+        for trie in tries:
+            if not remaining_formulas:
+                break
+
+        for pattern in formulas:
+            for trie in tries:
+                if not approximately_evaluate_abst_for(
+                        pattern,
+                        self.grammar,
+                        self.graph,
+                        {language.Constant("start", "<start>"): trie[path_to_trie_key(())]},
+                        trie).is_false():
+                    result.add(pattern)
+                    break
+
+        return result
 
     def _apply_filters(
             self,
@@ -951,53 +972,98 @@ class InvariantLearner:
             pattern: language.Formula,
             input_reachability_relation: Set[Tuple[str, str]]
     ) -> List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]]:
+        instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
+
         in_visitor = InVisitor()
         pattern.accept(in_visitor)
         variable_chains: Set[Tuple[language.Variable, ...]] = connected_chains(in_visitor.result)
-        assert all(chain[-1] == extract_top_level_constant(pattern) for chain in variable_chains)
-        instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = []
+        start_const = extract_top_level_constant(pattern)
+        assert all(chain[-1] == start_const for chain in variable_chains)
+        reachable = {fr: [to for fr_, to in input_reachability_relation
+                          if fr == fr_ and to not in self.exclude_nonterminals] for fr in self.grammar}
 
-        for variable_chain in variable_chains:
-            nonterminal_sequences: Set[Tuple[str, ...]] = set([])
+        # Combine variable chains to a tree structure to avoid conflicting instantiations.
+        InstantiationTree = Tree[Tuple[language.Variable, Optional[str]]]
+        initial_tree: InstantiationTree = tree_from_paths(
+            [list(reversed(chain)) for chain in variable_chains])
 
-            partial_sequences: Set[Tuple[str, ...]] = {("<start>",)}
-            while partial_sequences:
-                partial_sequence = next(iter(partial_sequences))
-                partial_sequences.remove(partial_sequence)
-                if len(partial_sequence) == len(variable_chain):
-                    nonterminal_sequences.add(tuple(reversed(partial_sequence)))
-                    continue
+        # We basically perform a BFS over the partially instantiated trees and
+        # instantiate children based on the parent values.
+        stack: List[Tuple[
+            List[InstantiationTree],
+            Dict[NonterminalPlaceholderVariable, language.BoundVariable]]] = \
+            [([tree for _, tree in tree_paths(initial_tree)], {})]
+        while stack:
+            remaining_subtrees, inst_map = stack.pop()
+            if not remaining_subtrees:
+                instantiations.append(inst_map)
+                continue
 
-                partial_sequences.update({
-                    partial_sequence + (to_nonterminal,)
-                    for (from_nonterminal, to_nonterminal) in input_reachability_relation
-                    if (from_nonterminal == partial_sequence[-1]
-                        and to_nonterminal not in self.exclude_nonterminals)})
+            parent_variable: PlaceholderVariable
+            children: List[InstantiationTree]
+            (parent_variable, children), *remaining_subtrees = remaining_subtrees
 
-            new_instantiations = [
-                {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
-                 for idx, variable in enumerate(variable_chain[:-1])}
-                for nonterminal_sequence in nonterminal_sequences]
+            if not children:
+                stack.append((remaining_subtrees, inst_map))
+                continue
 
-            if not instantiations:
-                instantiations = new_instantiations
+            if isinstance(parent_variable, PlaceholderVariable):
+                assert parent_variable in inst_map
+                parent_instantiation = inst_map[parent_variable].n_type
             else:
-                previous_instantiations = instantiations
-                instantiations = []
-                for previous_instantiation in previous_instantiations:
-                    for new_instantiation in new_instantiations:
-                        # NOTE: There might be clashes, since multiple chains are generated if there is
-                        #       more than one variable in a match expression. We have to first check if
-                        #       two instantiations happen to conform to each other.
-                        if any(new_instantiation[key_1].n_type != previous_instantiation[key_2].n_type
-                               for key_1 in new_instantiation
-                               for key_2 in previous_instantiation
-                               if key_1 == key_2):
-                            continue
+                parent_instantiation = parent_variable.n_type
 
-                        instantiations.append(previous_instantiation | new_instantiation)
+            reachable_nonterminals = reachable[parent_instantiation]
+            if not reachable_nonterminals:
+                continue
+
+            for instantiation in itertools.product(*[reachable_nonterminals for _ in range(len(children))]):
+                assert all(child[0] not in inst_map for child in children)
+                child_insts = {
+                    child[0]: language.BoundVariable(child[0].name, instantiation[idx])
+                    for idx, child in enumerate(children)}
+                stack.append((remaining_subtrees, inst_map | child_insts))
 
         return instantiations
+
+        # for variable_chain in variable_chains:
+        #     nonterminal_sequences: Set[Tuple[str, ...]] = set([])
+        #
+        #     partial_sequences: Set[Tuple[str, ...]] = {("<start>",)}
+        #     while partial_sequences:
+        #         partial_sequence = next(iter(partial_sequences))
+        #         partial_sequences.remove(partial_sequence)
+        #         if len(partial_sequence) == len(variable_chain):
+        #             nonterminal_sequences.add(tuple(reversed(partial_sequence)))
+        #             continue
+        #
+        #         partial_sequences.update({
+        #             partial_sequence + (to_nonterminal,)
+        #             for to_nonterminal in reachable[partial_sequence[-1]]
+        #             if to_nonterminal not in self.exclude_nonterminals})
+        #
+        #     new_instantiations: List[Dict[NonterminalPlaceholderVariable, language.BoundVariable]] = [
+        #         {variable: language.BoundVariable(variable.name, nonterminal_sequence[idx])
+        #          for idx, variable in enumerate(variable_chain[:-1])}
+        #         for nonterminal_sequence in nonterminal_sequences]
+        #
+        #     if not instantiations:
+        #         instantiations = new_instantiations
+        #     else:
+        #         previous_instantiations = instantiations
+        #         instantiations = []
+        #         for previous_instantiation in previous_instantiations:
+        #             for new_instantiation in new_instantiations:
+        #                 # NOTE: There might be clashes, since multiple chains are generated if there is
+        #                 #       more than one variable in a match expression. We have to first check if
+        #                 #       two instantiations happen to conform to each other.
+        #                 if any(new_instantiation[key].n_type != previous_instantiation[key].n_type for key in
+        #                        set(new_instantiation.keys()).intersection(set(previous_instantiation.keys()))):
+        #                     continue
+        #
+        #                 instantiations.append(previous_instantiation | new_instantiation)
+        #
+        # return instantiations
 
     def _instantiate_mexpr_placeholders(
             self,
@@ -1040,7 +1106,7 @@ class InvariantLearner:
                     mexpr_elements = [
                         replace_with_var(token)
                         for token in
-                        re.split(RE_NONTERMINAL, mexpr_str)
+                        RE_NONTERMINAL.split(mexpr_str)
                         if token]
 
                     constructor = (
@@ -1067,40 +1133,63 @@ class InvariantLearner:
         result: Set[str] = set([])
 
         candidate_trees: List[ParseTree] = [(in_nonterminal, None)]
-        i = 0
-        while candidate_trees and i <= self.mexpr_expansion_limit:
-            i += 1
-            tree = candidate_trees.pop(0)
+        for i in range(self.mexpr_expansion_limit + 1):
+            if not candidate_trees:
+                break
 
-            # If the candidate tree has the shape
-            #
-            #          qfd_nonterminal
-            #                 |
-            #         other_nonterminal
-            #                 |
-            #          ... subtree ...
-            #
-            # then we could as well quantify over `other_nonterminal`. Consequently,
-            # we prune this candidate. The other option is very likely also among
-            # inst_patterns.
+            old_candidates = list(candidate_trees)
+            candidate_trees = []
+            for tree in old_candidates:
+                # If the candidate tree has the shape
+                #
+                #          qfd_nonterminal
+                #                 |
+                #         other_nonterminal
+                #                 |
+                #          ... subtree ...
+                #
+                # then we could as well quantify over `other_nonterminal`. Consequently,
+                # we prune this candidate. The other option is very likely also among
+                # inst_patterns.
 
-            if (tree[1] is not None and
-                    len(tree[1]) == 1 and
-                    tree[1][0][1]):
-                continue
+                if (tree[1] is not None and
+                        len(tree[1]) == 1 and
+                        tree[1][0][1]):
+                    continue
 
-            nonterminal_occurrences = [
-                [path for path, _ in filter_tree(tree, lambda t: t[0] == ntype)]
-                for ntype in nonterminal_types]
+                nonterminal_occurrences: List[Tuple[Path, ...]] = []
+                trie = trie_from_parse_tree(tree)
+                stack: List[Tuple[Tuple[Path, ...], Tuple[str], str]] = \
+                    [((), nonterminal_types, path_to_trie_key(()))]
+                while stack:
+                    matches, remaining_types, trie_key = stack.pop(0)
+                    if not remaining_types:
+                        nonterminal_occurrences.append(matches)
 
-            if all(occ for occ in nonterminal_occurrences):
-                product = list(itertools.product(*nonterminal_occurrences))
-                matching_seqs = [
-                    seq for seq in product
-                    if (list(seq) == sorted(seq) and
-                        all(is_before(None, seq[idx], seq[idx + 1]) for idx in range(len(seq) - 1)))]
+                    cur_path, cur_tree = trie[trie_key]
 
-                for matching_seq in matching_seqs:
+                    if cur_tree[0] == remaining_types[0]:
+                        remaining_types = remaining_types[1:]
+                        matches = matches + (cur_path,)
+
+                        if not remaining_types:
+                            nonterminal_occurrences.append(matches)
+                            continue
+
+                        # For the next trie key, skip the whole subtree of cur_path
+                        if not cur_tree[1]:
+                            next_key = next_trie_key(trie, trie_key)
+                        else:
+                            suffixes = list(filter(None, trie.suffixes(trie_key)))
+                            assert suffixes
+                            next_key = next_trie_key(trie, trie_key + suffixes[-1])
+                    else:
+                        next_key = next_trie_key(trie, trie_key)
+
+                    if next_key is not None:
+                        stack.append((matches, remaining_types, next_key))
+
+                for matching_seq in nonterminal_occurrences:
                     assert len(matching_seq) == len(nonterminal_types)
 
                     # We change node labels to be able to correctly identify variable positions in the tree.
@@ -1139,7 +1228,7 @@ class InvariantLearner:
 
                     result.add(tree_to_string(bind_expr_tree, show_open_leaves=True))
 
-            candidate_trees.extend(expand_tree(tree, self.canonical_grammar))
+                candidate_trees.extend(expand_tree(tree, self.canonical_grammar))
 
         return result
 
