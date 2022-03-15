@@ -390,11 +390,11 @@ forall <arith_expr> container_0 in start:
 
         correct_property_2_b_re = re.escape("""
 (forall <arith_expr> container in start:
-  exists <number> elem in container:
-    (<= (str.to.int elem) (str.to.int "-""".strip()) + r"[1-9][0-9]*" + re.escape('")) ' + """
-'and forall <arith_expr> container_0 in start:
-   exists <function> elem_0 in container_0:
-     (= elem_0 "sqrt"))""")
+   exists <number> elem in container:
+     (<= (str.to.int elem) (str.to.int "-""".strip()) + r"[1-9][0-9]*" + '"' + re.escape(""")) and
+forall <arith_expr> container_0 in start:
+  exists <function> elem_0 in container_0:
+    (= elem_0 "sqrt"))""")
 
         grammar = {
             "<start>": ["<arith_expr>"],
@@ -463,8 +463,8 @@ forall <arith_expr> container_0 in start:
             lambda f: ISLaUnparser(f).unparse(),
             [r for r, p in result.items() if p > .0]))
 
-        self.assertTrue(correct_property_1_a.strip() in nonzero_precision_results or
-                        correct_property_1_b.strip() in nonzero_precision_results)
+        self.assertTrue((correct_property_1_a.strip() in nonzero_precision_results) or
+                        (correct_property_1_b.strip() in nonzero_precision_results))
 
         self.assertTrue(
             any(re.match(correct_property_2_a_re, r) for r in nonzero_precision_results) or
