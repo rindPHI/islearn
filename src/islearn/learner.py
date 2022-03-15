@@ -6,6 +6,7 @@ import logging
 import os.path
 import pkgutil
 import re
+import string
 import sys
 from abc import ABC
 from functools import lru_cache
@@ -31,10 +32,11 @@ from isla.z3_helpers import z3_subst, evaluate_z3_expression, is_valid, \
 from pathos import multiprocessing as pmp
 
 from islearn.helpers import connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
-    is_int, is_float
+    is_int, is_float, e_assert
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
-    AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression
+    AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression, DisjunctiveStringsPlaceholderVariable, \
+    StringPlaceholderVariableTypes
 from islearn.mutation import MutationFuzzer
 from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree, tree_leaves, \
     get_subtree
@@ -1279,9 +1281,25 @@ class InvariantLearner:
                 result.add(formula)
                 continue
 
-            instantiations: List[Dict[StringPlaceholderVariable, str]] = dict_of_lists_to_list_of_dicts(
-                string_placeholder_insts[formula])
-            for instantiation in instantiations:
+            # We make instantiations for DSTRINGS placeholders map to *sets of tuples* of strings instead of
+            # sets of strings. To prevent explosion, we apply a simple heuristic: We consider numbers and
+            # single letters as irrelevant. This holds for our use cases (e.g., considering 'xmlns', 'sqrt',
+            # and '*') but can be problematic in cases where something like 'f' should be considered. However,
+            # some reduction *has* to be done, and this works for our use cases and seems to be sensile in
+            # general (protected/pre-defined identifiers are rarely numbers or single characters).
+            insts = {
+                ph:
+                    s if isinstance(ph, StringPlaceholderVariable)
+                    else (s_ := {elem for elem in s if not is_int(elem) and elem not in string.ascii_letters},
+                          {c for k in range(1, len(s_) + 1) for c in tuple(itertools.combinations(s_, k))})[-1]
+                for ph, s in string_placeholder_insts[formula].items()}
+
+            string_ph_insts: List[Dict[StringPlaceholderVariable, str | Set[str]]] = \
+                dict_of_lists_to_list_of_dicts(insts)
+
+            for instantiation in string_ph_insts:
+                # TODO: We have to account for sets in instantiations in the abstract
+                #       evaluation, or expand the formula before. Probably try the former.
                 if any(
                         not approximately_evaluate_abst_for(
                             formula,
@@ -1304,24 +1322,10 @@ class InvariantLearner:
             self,
             inst_patterns: Set[language.Formula],
             tries: List[datrie.Trie]) -> Dict[language.Formula, Dict[StringPlaceholderVariable, Set[str]]]:
-        if all(not isinstance(placeholder, StringPlaceholderVariable)
+        if all(not isinstance(placeholder, StringPlaceholderVariableTypes)
                for inst_pattern in inst_patterns
                for placeholder in get_placeholders(inst_pattern)):
             return dict.fromkeys(inst_patterns)
-
-        # NOTE: To reduce the search space, we also exclude fragments for nonterminals which
-        #       have more than `trivial_fragments_exclusion_threshold` terminal children.
-        #       This is rather arbitrary, but avoids finding all kinds of spurious invariants
-        #       like "there is an 'e' in the text" which are likely to hold any many cases.
-        #       10 is the length of a typical <DIGIT> nonterminal expansion set, which
-        #       is why those nonterminal fragments would not be pruned.
-        trivial_fragments_exclusion_threshold = 10
-
-        # many_trivial_terminal_parents: Set[str] = set([])
-        # for nonterminal in self.grammar:
-        #     reachable = self._reachable_characters(nonterminal)
-        #     if reachable is not None and len(reachable) > trivial_fragments_exclusion_threshold:
-        #         many_trivial_terminal_parents.add(nonterminal)
 
         fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
         for trie in tries:
@@ -1333,13 +1337,6 @@ class InvariantLearner:
                 path, tree = remaining_paths.pop(0)
                 if not is_nonterminal(tree.value):
                     continue
-
-                # single_child_ancestors: List[language.DerivationTree] = [tree]
-                # while len(single_child_ancestors[-1].children) == 1:
-                #     single_child_ancestors.append(single_child_ancestors[-1].children[0])
-                #
-                # if any(child.value in many_trivial_terminal_parents for child in single_child_ancestors):
-                #     continue
 
                 tree_string = str(tree)
                 if not tree_string:
@@ -1365,12 +1362,12 @@ class InvariantLearner:
             "Extracted %d language fragments from sample inputs",
             sum(len(value) for value in fragments.values()))
 
-        result: Dict[language.Formula, Dict[StringPlaceholderVariable, Set[str]]] = {}
+        result: Dict[language.Formula, Dict[StringPlaceholderVariableTypes, Set[str]]] = {}
         for inst_pattern in inst_patterns:
             def extract_instantiations(subformula: language.Formula) -> None:
                 nonlocal result
 
-                if not any(isinstance(arg, StringPlaceholderVariable) for arg in subformula.free_variables()):
+                if not any(isinstance(arg, StringPlaceholderVariableTypes) for arg in subformula.free_variables()):
                     return
 
                 non_ph_vars = {v for v in subformula.free_variables() if not isinstance(v, PlaceholderVariable)}
@@ -1378,7 +1375,7 @@ class InvariantLearner:
                 insts: Set[str] = set(functools.reduce(
                     set.__or__, [fragments.get(var.n_type, set([])) for var in non_ph_vars]))
 
-                ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariable)}
+                ph_vars = {v for v in subformula.free_variables() if isinstance(v, StringPlaceholderVariableTypes)}
                 for ph in ph_vars:
                     result.setdefault(inst_pattern, {}).setdefault(ph, set([])).update(insts)
 
@@ -1399,35 +1396,47 @@ class InvariantLearner:
 
 def substitute_string_placeholder(
         ph: PlaceholderVariable,
-        inst: str,
+        inst: str | tuple[str, ...],
         formula: language.Formula) -> language.Formula | bool:
+    # A tuple of instantiations indicates that a disjunction of formulas shall be
+    # returned, including one instantiated formula for each instantiation.
+
     if not any(v == ph for v in formula.free_variables()
-               if isinstance(v, StringPlaceholderVariable)):
+               if isinstance(v, StringPlaceholderVariableTypes)):
         return False
 
-    if isinstance(formula, language.SMTFormula):
-        return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
-            ph.to_smt(): z3.StringVal(inst)
-        })), *[v for v in formula.free_variables() if v != ph])
-    elif isinstance(formula, language.StructuralPredicateFormula):
-        return language.StructuralPredicateFormula(
-            formula.predicate,
-            *[inst if arg == ph else arg for arg in formula.args]
-        )
-    elif isinstance(formula, language.SemanticPredicateFormula):
-        return language.SemanticPredicateFormula(
-            formula.predicate,
-            *[inst if arg == ph else arg for arg in formula.args]
-        )
+    def perform_single_inst(inst_str: str) -> Optional[language.Formula]:
+        if isinstance(formula, language.SMTFormula):
+            return language.SMTFormula(cast(z3.BoolRef, z3_subst(formula.formula, {
+                ph.to_smt(): z3.StringVal(inst_str)
+            })), *[v for v in formula.free_variables() if v != ph])
+        elif isinstance(formula, language.StructuralPredicateFormula):
+            return language.StructuralPredicateFormula(
+                formula.predicate,
+                *[inst_str if arg == ph else arg for arg in formula.args]
+            )
+        elif isinstance(formula, language.SemanticPredicateFormula):
+            return language.SemanticPredicateFormula(
+                formula.predicate,
+                *[inst_str if arg == ph else arg for arg in formula.args])
 
-    return False
+        return None
+
+    if isinstance(inst, str):
+        inst = inst,
+
+    single_insts = list(map(perform_single_inst, inst))
+    if any(single_inst is None for single_inst in single_insts):
+        return False
+
+    return functools.reduce(language.Formula.__or__, single_insts)
 
 
 def approximately_evaluate_abst_for(
         formula: language.Formula,
         grammar: Grammar,
         graph: gg.GrammarGraph,
-        assignments: Dict[language.Variable, Tuple[Path, language.DerivationTree] | str],
+        assignments: Dict[language.Variable, Tuple[Path, language.DerivationTree] | str | Set[str]],
         trie: Optional[datrie.Trie] = None) -> ThreeValuedTruth:
     # TODO: Handle String placeholder variables in predicate formulas
     if isinstance(formula, language.SMTFormula):
@@ -1444,24 +1453,33 @@ def approximately_evaluate_abst_for(
             translation = evaluate_z3_expression(formula.formula)
             var_map: Dict[str, language.Variable] = {
                 var.name: var
-                for var in assignments
+                for var in formula.free_variables()
             }
 
-            # args_instantiation = tuple([
-            #     str(assignments[var_map[arg]][1])
-            #     for arg in translation[0]])
+            # Expand multiple instantiations for `DisjunctiveStringsPlaceholderVariable`s
+            split_assignments: List[Dict[language.Variable, Tuple[Path, language.DerivationTree] | str]] = [
+                dict(t) for t in itertools.product(*[
+                    ((var, val),) if not isinstance(var, DisjunctiveStringsPlaceholderVariable)
+                    else tuple(itertools.product((var,), e_assert(val, lambda v: isinstance(v, tuple))))
+                    for var, val in assignments.items()
+                    if var in formula.free_variables()])]
 
-            args_instantiation = ()
-            for arg in translation[0]:
-                var = var_map[arg]
-                if isinstance(var, StringPlaceholderVariable):
-                    args_instantiation += (assignments[var],)
-                else:
-                    args_instantiation += (str(assignments[var][1]),)
+            # The multiple assignments in the list are treated as a disjunction:
+            # As soon as any assignment yields a `True` result, we return `True`.
 
-            return ThreeValuedTruth.from_bool(
-                translation[1](args_instantiation) if args_instantiation
-                else translation[1])
+            for single_assignment in split_assignments:
+                args_instantiation = ()
+                for arg in translation[0]:
+                    var = var_map[arg]
+                    if isinstance(var, StringPlaceholderVariableTypes):
+                        args_instantiation += (single_assignment[var],)
+                    else:
+                        args_instantiation += (str(single_assignment[var][1]),)
+
+                if translation[1](args_instantiation) if args_instantiation else translation[1]:
+                    return ThreeValuedTruth.true()
+
+            return ThreeValuedTruth.false()
         except DomainError:
             return ThreeValuedTruth.false()
         except NotImplementedError:
@@ -1659,7 +1677,9 @@ def get_placeholders(formula: language.Formula) -> Set[PlaceholderVariable]:
     supported_placeholder_types = {
         NonterminalPlaceholderVariable,
         NonterminalStringPlaceholderVariable,
-        StringPlaceholderVariable}
+        StringPlaceholderVariable,
+        DisjunctiveStringsPlaceholderVariable,
+    }
 
     assert all(any(isinstance(ph, t) for t in supported_placeholder_types) for ph in placeholders), \
         "Only " + ", ".join(map(lambda t: t.__name__, supported_placeholder_types)) + " supported so far."

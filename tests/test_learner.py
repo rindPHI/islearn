@@ -13,7 +13,7 @@ from fuzzingbook.Grammars import srange
 from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
-from isla.evaluator import evaluate, implies
+from isla.evaluator import evaluate, implies, equivalent
 from isla.helpers import strip_ws
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE, IN_TREE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
@@ -1192,10 +1192,47 @@ forall <expr> attribute in start:
 
         self.assertIn(parse_abstract_isla(expected, RACKET_BSL_GRAMMAR), instantiations)
 
-    def test_simplified_racket_xml_defuse_prop_get_candidates(self):
-        def prop(tree: language.DerivationTree) -> bool:
-            return load_racket(tree) is True
+    def test_instantiate_dstrings_placeholders_racket(self):
+        property = """
+forall <expr> attribute in start:
+  forall <expr> prefix_id="<maybe_comments><MWSS>{<name> prefix_use}" in attribute:
+    ((= prefix_use <?DSTRINGS>) or
+      exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+        (inside(attribute, contained_tree) and
+         exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
+           (= prefix_use prefix_def)))"""
 
+        expected = """
+forall <expr> attribute in start:
+  forall <expr> prefix_id="<maybe_comments><MWSS>{<name> prefix_use}" in attribute:
+    ((((= prefix_use "*") or
+      (= prefix_use "sqrt")) or
+     (= prefix_use "+")) or
+    exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+      (inside(attribute, contained_tree) and
+      exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
+        (= prefix_use prefix_def)))"""
+
+        racket_code = """
+(define (point-origin-calc x y)
+  (sqrt (+ (* x x)
+           (* y y))))""".strip()
+        tree = language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])
+
+        instantiations = InvariantLearner(
+            RACKET_BSL_GRAMMAR,
+        )._instantiate_string_placeholders(
+            {parse_abstract_isla(property, RACKET_BSL_GRAMMAR)},
+            [tree.trie()])
+
+        print(len(instantiations))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), instantiations)))
+
+        self.assertTrue(any(
+            equivalent(parse_abstract_isla(expected, RACKET_BSL_GRAMMAR), inst)
+            for inst in instantiations))
+
+    def test_simplified_racket_xml_defuse_prop_get_candidates(self):
         racket_code = """
 (define (point-origin-calc x y)
   (+ (+ (+ x x) (+ y y))))""".strip()

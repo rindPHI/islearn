@@ -21,9 +21,9 @@ from islearn.mexpr_parser import MexprParserListener
 from islearn.mexpr_parser.MexprParser import MexprParser
 
 NONTERMINAL_PLACEHOLDER = "<?NONTERMINAL>"
+MEXPR_PLACEHOLDER = "<?MATCHEXPR>"
 STRING_PLACEHOLDER = "<?STRING>"
 DSTRINGS_PLACEHOLDER = "<?DSTRINGS>"
-MEXPR_PLACEHOLDER = "<?MATCHEXPR>"
 
 
 class PlaceholderVariable(language.BoundVariable, ABC):
@@ -58,6 +58,9 @@ class DisjunctiveStringsPlaceholderVariable(PlaceholderVariable):
 
     def __str__(self):
         return DSTRINGS_PLACEHOLDER
+
+
+StringPlaceholderVariableTypes = StringPlaceholderVariable | DisjunctiveStringsPlaceholderVariable
 
 
 @dataclass(frozen=True, eq=True, init=True)
@@ -125,7 +128,8 @@ class AbstractVariableManager(VariableManager):
                     n_type == Variable.NUMERIC_NTYPE or
                     n_type in self.grammar or
                     n_type == NONTERMINAL_PLACEHOLDER or
-                    n_type == STRING_PLACEHOLDER), \
+                    n_type == STRING_PLACEHOLDER or
+                    n_type == DSTRINGS_PLACEHOLDER), \
                 f"Unknown nonterminal type {n_type} for variable {name}"
 
         try:
@@ -292,9 +296,7 @@ class AbstractISLaUnparser(ISLaUnparser):
         result = smt_expr_to_str(formula.formula)
 
         for variable in formula.free_variables():
-            if isinstance(variable, StringPlaceholderVariable):
-                result = result.replace(variable.name, str(variable))
-            elif isinstance(variable, DisjunctiveStringsPlaceholderVariable):
+            if isinstance(variable, StringPlaceholderVariableTypes):
                 result = result.replace(variable.name, str(variable))
 
         return [result]
