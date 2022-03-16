@@ -204,7 +204,7 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
 
         raw_inputs = [
             "<a>asdf</a>",
-            "<b>xyz<c/><x>X</x></b>",
+            "<b><f>xyz</f><c/><x>X</x></b>",
             "<a/>"
         ]
 
@@ -394,7 +394,7 @@ forall <json> container in start:
             correct_property.strip(),
             list(map(lambda f: ISLaUnparser(f).unparse(), [r for r, p in result.items() if p[0] > .0])))
 
-    # @pytest.mark.flaky(reruns=3, reruns_delay=2)
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_alhazen_sqrt_example(self):
         correct_property_1_a = """
 (forall <arith_expr> container in start:

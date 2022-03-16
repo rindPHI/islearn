@@ -654,10 +654,10 @@ class InvariantLearner:
 
             # NOTE: At this point, filtering is not useful. It is cheaper to first instantiate
             #       match expressions (if any), which reduces the search space, and to filter then.
-            pattern_insts_without_nonterminal_placeholders = self._filter_partial_instantiations(
-                pattern_insts_without_nonterminal_placeholders, tries)
-            logger.debug("%d instantiations remain after filtering",
-                         len(pattern_insts_without_nonterminal_placeholders))
+            # pattern_insts_without_nonterminal_placeholders = self._filter_partial_instantiations(
+            #     pattern_insts_without_nonterminal_placeholders, tries)
+            # logger.debug("%d instantiations remain after filtering",
+            #              len(pattern_insts_without_nonterminal_placeholders))
 
             # 2. Match expression placeholders
             pattern_insts_without_mexpr_placeholders = self._instantiate_mexpr_placeholders(
@@ -1642,21 +1642,25 @@ def approximately_evaluate_abst_for(
                             del sub_trie[sub_path_key]
 
                         next_key = next_trie_key(sub_trie, path_to_trie_key(last_path))
-                        if next_key is None:
-                            break
-                        sub_sub_trie = get_subtrie(sub_trie, next_key)
+                        while next_key is not None:
+                            sub_sub_trie = get_subtrie(sub_trie, next_key)
 
-                        matches = [
-                            (last_path + path, subtree)
-                            for path, subtree in sub_sub_trie.values()
-                            if subtree.value == placeholder_variable.n_type]
-                        if not matches:
-                            continue
+                            matches = [
+                                (last_path + path, subtree)
+                                for path, subtree in sub_sub_trie.values()
+                                if subtree.value == placeholder_variable.n_type]
+                            if not matches:
+                                continue
 
-                        new_assignments.extend([
-                            assignment | {placeholder_variable: (path, subtree)}
-                            for path, subtree in matches
-                        ])
+                            new_assignments.extend([
+                                assignment | {placeholder_variable: (path, subtree)}
+                                for path, subtree in matches
+                            ])
+
+                            for sub_path_key in sub_trie.keys(next_key):
+                                del sub_trie[sub_path_key]
+
+                            next_key = next_trie_key(sub_trie, path_to_trie_key(last_path))
 
             # For universal formulas, we only consider the first 3 new assignments
             # to save time. After match expression placeholders are instantiated,
