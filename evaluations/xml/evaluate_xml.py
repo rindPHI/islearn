@@ -2,6 +2,7 @@ import logging
 import os.path
 import re
 import string
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from html import escape
@@ -104,21 +105,26 @@ assert len(positive_trees) == len(urls)
 assert len(reduced_trees) == len(urls)
 
 # Learn invariants
-result = InvariantLearner(
+learning_inputs = reduced_trees[:3]
+validation_inputs = positive_trees[3:]
+
+learner = InvariantLearner(
     XML_GRAMMAR_WITH_NAMESPACE_PREFIXES,
     prop,
     activated_patterns={
         # "Balance",
         "Def-Use (XML-Tag Strict)",
     },
-    positive_examples=reduced_trees[:3],
+    positive_examples=learning_inputs,
     generate_new_learning_samples=False,
     do_generate_more_inputs=True,
-    mexpr_expansion_limit=3,
+    mexpr_expansion_limit=4,
+    max_nonterminals_in_mexpr=4,
     reduce_inputs_for_learning=False,
-    reduce_all_inputs=True,
+    reduce_all_inputs=False,  # Cannot reduce since otherwise, the xmlns keywords might get reduced away
     target_number_negative_samples=10,
-    target_number_positive_samples=3,
+    target_number_positive_samples=5,
+    target_number_positive_samples_for_learning=3,
     filter_inputs_for_learning_by_kpaths=False,
     min_precision=.3,  # Low precision needed because inv holds trivially for self-closing tags
     # We have to reduce the search space. With all nonterminals included, we obtain
@@ -135,7 +141,12 @@ result = InvariantLearner(
         "<xml-openclose-tag>",
         "<xml-close-tag>",
     }
-).learn_invariants()
+)
+
+start_time = time.time()
+result = learner.learn_invariants()
+duration = time.time() - start_time
+print(f"Duration: {duration:.2f} seconds")
 
 print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 

@@ -64,7 +64,7 @@ forall <expr> use_ctx in start:
         print("\n".join(map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations)))
         self.assertIn(parse_abstract_isla(expected.strip()), instantiations)
 
-    # @pytest.mark.flaky(reruns=3, reruns_delay=2)
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_mexpr_scriptsize_c(self):
         correct_property = """
 forall <expr> use_ctx in start:
@@ -99,7 +99,7 @@ forall <expr> use_ctx in start:
         #     scriptsizec.SCRIPTSIZE_C_GRAMMAR,
         #     prop,
         #     activated_patterns={"Def-Use (C)"},
-        #     positive_examples=inputs
+        #     positive_examples=good_inputs
         # ).generate_candidates(
         #     patterns_from_file()["Def-Use (C)"],
         #     good_inputs)
@@ -1121,6 +1121,104 @@ forall <ip_message> container in start:
             for inp in negative_trees
         ))
 
+    def test_instantiate_nonterminal_placeholders_xml_tag(self):
+        xml_doc = (
+            '<view:view xmlns:view="0">'
+            '<cm:content xs="1" xmlns:d="0" xmlns:cm="0" view:ce="tl">'
+            '<cm:description> </cm:description>'
+            '<cm:content>8</cm:content>'
+            '</cm:content>'
+            '</view:view>')
+        tree = language.DerivationTree.from_parse_tree(
+            list(EarleyParser(xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES).parse(xml_doc))[0])
+        repo = patterns_from_file()
+        learner = InvariantLearner(
+            xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES,
+            positive_examples={tree},
+            # mexpr_expansion_limit=3,
+            # max_nonterminals_in_mexpr=4,
+            exclude_nonterminals={
+                "<id-start-char>",
+                "<id-chars>",
+                "<id-char>",
+                "<text-char>",
+                "<text>",
+                "<xml-open-tag>",
+                "<xml-openclose-tag>",
+                "<xml-close-tag>",
+            }
+        )
+
+        instantiations = learner._instantiate_nonterminal_placeholders(
+            next(iter(repo["Def-Use (XML-Tag Strict)"])),
+            create_input_reachability_relation([tree]))
+
+        expected = parse_abstract_isla("""
+forall <xml-tree> xml_tree="{<?MATCHEXPR(<id-no-prefix> prefix_use)>}" in start:
+  exists <xml-tree> outer_tag="{<?MATCHEXPR(<xml-attribute> cont_attribute)>}" in start:
+    (inside(xml_tree, outer_tag) and
+     exists <xml-attribute> def_attribute="{<?MATCHEXPR(<id-no-prefix> ns_prefix, <id-no-prefix> prefix_def)>}" 
+         in cont_attribute:
+       ((= ns_prefix <?STRING>) and
+        (= prefix_use prefix_def)))
+""", xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES)
+
+        print(AbstractISLaUnparser(expected).unparse())
+        print(len(instantiations))
+        print("\n".join(map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations)))
+
+        self.assertIn(
+            AbstractISLaUnparser(expected).unparse(),
+            map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations))
+
+    def test_instantiate_mexpr_placeholders_xml(self):
+        repo = patterns_from_file()
+        learner = InvariantLearner(
+            xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES,
+            mexpr_expansion_limit=4,
+            max_nonterminals_in_mexpr=4,
+            exclude_nonterminals={
+                "<id-start-char>",
+                "<id-chars>",
+                "<id-char>",
+                "<text-char>",
+                "<text>",
+                "<xml-open-tag>",
+                "<xml-openclose-tag>",
+                "<xml-close-tag>",
+            }
+        )
+
+        partial_inst = parse_abstract_isla("""
+forall <xml-tree> xml_tree="{<?MATCHEXPR(<id-no-prefix> prefix_use)>}" in start:
+  exists <xml-tree> outer_tag="{<?MATCHEXPR(<xml-attribute> cont_attribute)>}" in start:
+    (inside(xml_tree, outer_tag) and
+     exists <xml-attribute> def_attribute="{<?MATCHEXPR(<id-no-prefix> ns_prefix, <id-no-prefix> prefix_def)>}" 
+         in cont_attribute:
+       ((= ns_prefix <?STRING>) and
+        (= prefix_use prefix_def)))
+""", xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES)
+
+        expected = parse_abstract_isla("""
+forall <xml-tree> xml_tree="<{<id-no-prefix> prefix_use}:<id-no-prefix>><inner-xml-tree><xml-close-tag>" in start:
+  exists <xml-tree> outer_tag="<<id> {<xml-attribute> cont_attribute}><inner-xml-tree><xml-close-tag>" in start:
+    (inside(xml_tree, outer_tag) and
+     exists <xml-attribute> def_attribute="{<id-no-prefix> ns_prefix}:{<id-no-prefix> prefix_def}=\\\"<text>\\\"" 
+         in cont_attribute:
+       ((= ns_prefix <?STRING>) and
+        (= prefix_use prefix_def)))
+""", xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES)
+
+        instantiations = learner._instantiate_mexpr_placeholders({partial_inst})
+
+        print(AbstractISLaUnparser(expected).unparse())
+        print(len(instantiations))
+        print("\n".join(map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations)))
+
+        self.assertIn(
+            AbstractISLaUnparser(expected).unparse(),
+            map(lambda f: AbstractISLaUnparser(f).unparse(), instantiations))
+
     def test_instantiate_nonterminal_placeholders_racket(self):
         racket_code = """
 (define (point-origin-calc x y)
@@ -1200,36 +1298,48 @@ forall <expr> attribute="{<?MATCHEXPR(<name> prefix_use)>}" in start:
         mexprs = learner._infer_mexpr("<expr>", ("<name>",))
         self.assertTrue(mexprs)
 
+        print(mexprs)
+
         self.assertTrue(
-            any(re.match(r'<maybe_comments><MWSS>\(<MWSS><name--[0-9]+><wss_exprs><MWSS>\)', mexpr_str)
-                for mexpr_str in mexprs))
-        self.assertTrue(any(re.match(r'<maybe_comments><MWSS><name--[0-9]+>', mexpr_str) for mexpr_str in mexprs))
+            any(tuple([re.sub(r'<([a-zA-Z_]+)--?[0-9]+>', r'<\1>', elem) for elem in mexpr_elements]) ==
+                ('<maybe_comments>', '<MWSS>', '(', '<MWSS>', '<name>', '<wss_exprs>', '<MWSS>', ')')
+                for mexpr_elements in mexprs))
+        self.assertTrue(
+            any(tuple([re.sub(r'<([a-zA-Z_]+)--?[0-9]+>', r'<\1>', elem) for elem in mexpr_elements]) ==
+                ('<maybe_comments>', '<MWSS>', '<name>')
+                for mexpr_elements in mexprs))
 
     def test_infer_mexpr_xml_tree(self):
         learner = InvariantLearner(
             xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES,
             None,
             positive_examples={},
-            mexpr_expansion_limit=2
+            mexpr_expansion_limit=2,
+            max_nonterminals_in_mexpr=4,  # Optional
         )
 
         mexprs = learner._infer_mexpr("<xml-tree>", ("<id>", "<inner-xml-tree>", "<id>"))
         self.assertTrue(mexprs)
 
-        # print("\n".join(mexprs))
+        # print(mexprs)
 
         self.assertTrue(
-            any(re.match(r'<<id--?[0-9]+> <xml-attribute>><inner-xml-tree--?[0-9]+></<id--?[0-9]+>>', mexpr_str)
-                for mexpr_str in mexprs))
-        self.assertTrue(any(re.match(r'<<id--?[0-9]+>><inner-xml-tree--?[0-9]+></<id--?[0-9]+>>', mexpr_str)
-                            for mexpr_str in mexprs))
+            any(tuple([re.sub(r'<([a-zA-Z_-]+?)--?[0-9]+>', r'<\1>', elem) for elem in mexpr_elements]) ==
+                ('<', '<id>', ' ', '<xml-attribute>', '>', '<inner-xml-tree>', '</', '<id>', '>')
+                for mexpr_elements in mexprs))
+
+        self.assertTrue(
+            any(tuple([re.sub(r'<([a-zA-Z_-]+?)--?[0-9]+>', r'<\1>', elem) for elem in mexpr_elements]) ==
+                ('<', '<id>', '>', '<inner-xml-tree>', '</', '<id>', '>')
+                for mexpr_elements in mexprs))
 
     def test_infer_mexpr_xml_attr(self):
         learner = InvariantLearner(
             xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES,
             None,
             positive_examples={},
-            mexpr_expansion_limit=3
+            mexpr_expansion_limit=3,
+            max_nonterminals_in_mexpr=3,
         )
 
         mexprs = learner._infer_mexpr("<xml-attribute>", ("<id-no-prefix>", "<id-no-prefix>",))
@@ -1238,8 +1348,9 @@ forall <expr> attribute="{<?MATCHEXPR(<name> prefix_use)>}" in start:
         print(mexprs)
 
         self.assertTrue(
-            any(re.match(r'<id-no-prefix--?[0-9]+>:<id-no-prefix--?[0-9]+>="<text>"', mexpr_str)
-                for mexpr_str in mexprs))
+            any(tuple([re.sub(r'<([a-zA-Z_-]+?)--?[0-9]+>', r'<\1>', elem) for elem in mexpr_elements]) ==
+                ('<id-no-prefix>', ':', '<id-no-prefix>', '="', '<text>', '"')
+                for mexpr_elements in mexprs))
 
     def test_instantiate_mexpr_placeholders_racket(self):
         learner = InvariantLearner(

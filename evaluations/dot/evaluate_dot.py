@@ -23,6 +23,7 @@ dirname = os.path.abspath(os.path.dirname(__file__))
 parser = PEGParser(DOT_GRAMMAR)
 reducer = InputReducer(DOT_GRAMMAR, prop, k=3)
 
+# TODO: Obtain some more DOT files
 urls = [
     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
     "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
@@ -81,9 +82,7 @@ result = InvariantLearner(
     target_number_positive_samples=15,
     target_number_negative_samples=20,
     max_disjunction_size=2,
-    include_negations_in_disjunctions=False,
     filter_inputs_for_learning_by_kpaths=False,
-    max_conjunction_size=2,
     min_recall=1,
     min_precision=.8,
     reduce_inputs_for_learning=False,

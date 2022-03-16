@@ -240,6 +240,7 @@ class InvariantLearner:
             target_number_negative_samples: int = 10,
             target_number_positive_samples_for_learning: int = 10,
             mexpr_expansion_limit: int = 1,
+            max_nonterminals_in_mexpr: Optional[int] = None,
             min_recall: float = .9,
             min_precision: float = .6,
             max_disjunction_size: int = 1,
@@ -270,6 +271,7 @@ class InvariantLearner:
         self.prop = prop
         self.k = k
         self.mexpr_expansion_limit = mexpr_expansion_limit
+        self.max_nonterminals_in_mexpr = max_nonterminals_in_mexpr
         self.min_recall = min_recall
         self.min_precision = min_precision
         self.max_disjunction_size = max_disjunction_size
@@ -338,14 +340,16 @@ class InvariantLearner:
 
         if self.generate_new_learning_samples or not self.original_positive_examples:
             self.positive_examples_for_learning = \
-                self.sort_inputs(
+                self._sort_inputs(
                     self.positive_examples,
+                    self.filter_inputs_for_learning_by_kpaths,
                     more_paths_weight=1.7,
                     smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
         else:
             self.positive_examples_for_learning = \
-                self.sort_inputs(
+                self._sort_inputs(
                     self.original_positive_examples,
+                    self.filter_inputs_for_learning_by_kpaths,
                     more_paths_weight=1.7,
                     smaller_inputs_weight=1.0)[:self.target_number_positive_samples_for_learning]
 
@@ -427,7 +431,7 @@ class InvariantLearner:
             len(invariants),
             int(self.min_recall * 100))
 
-        # logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
+        logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
 
         if self.perform_static_implication_check:
             # We eliminate rows in recall_truth_table whose formula is implied by that of
@@ -648,6 +652,13 @@ class InvariantLearner:
             logger.debug("Found %d instantiations of pattern meeting quantifier requirements",
                          len(pattern_insts_without_nonterminal_placeholders))
 
+            # NOTE: At this point, filtering is not useful. It is cheaper to first instantiate
+            #       match expressions (if any), which reduces the search space, and to filter then.
+            pattern_insts_without_nonterminal_placeholders = self._filter_partial_instantiations(
+                pattern_insts_without_nonterminal_placeholders, tries)
+            logger.debug("%d instantiations remain after filtering",
+                         len(pattern_insts_without_nonterminal_placeholders))
+
             # 2. Match expression placeholders
             pattern_insts_without_mexpr_placeholders = self._instantiate_mexpr_placeholders(
                 pattern_insts_without_nonterminal_placeholders)
@@ -714,11 +725,6 @@ class InvariantLearner:
             formulas: Iterable[language.Formula],
             tries: Iterable[datrie.Trie]) -> Set[language.Formula]:
         result: Set[language.Formula] = set()
-
-        remaining_formulas = list(formulas)
-        for trie in tries:
-            if not remaining_formulas:
-                break
 
         for pattern in formulas:
             for trie in tries:
@@ -825,15 +831,17 @@ class InvariantLearner:
                 len(self.negative_examples) - ne_before
             )
 
-        self.positive_examples = self.sort_inputs(
+        self.positive_examples = self._sort_inputs(
             self.positive_examples,
+            self.filter_inputs_for_learning_by_kpaths,
             more_paths_weight=1.5,
             smaller_inputs_weight=1.0,
         )[:self.target_number_positive_samples]
 
         self.negative_examples = \
-            self.sort_inputs(
+            self._sort_inputs(
                 self.negative_examples,
+                self.filter_inputs_for_learning_by_kpaths,
                 more_paths_weight=2.0,
                 smaller_inputs_weight=1.0
             )[:self.target_number_negative_samples]
@@ -896,9 +904,10 @@ class InvariantLearner:
 
         return result
 
-    def sort_inputs(
+    def _sort_inputs(
             self,
             inputs: Iterable[language.DerivationTree],
+            filter_inputs_for_learning_by_kpaths: bool,
             more_paths_weight: float = 1.0,
             smaller_inputs_weight: float = 0.0) -> List[language.DerivationTree]:
         assert more_paths_weight or smaller_inputs_weight
@@ -941,7 +950,7 @@ class InvariantLearner:
             inputs.remove(inp)
             uncovered = uncovered_paths(inp)
 
-            if self.filter_inputs_for_learning_by_kpaths and not uncovered:
+            if filter_inputs_for_learning_by_kpaths and not uncovered:
                 continue
 
             covered_paths.update(uncovered)
@@ -1095,7 +1104,7 @@ class InvariantLearner:
                 in_nonterminal = qfd_formula_w_mexpr_phs.bound_variable.n_type
                 nonterminal_types: Tuple[str, ...] = tuple([var.n_type for var in mexpr_ph.variables])
 
-                for mexpr_str in self._infer_mexpr(in_nonterminal, nonterminal_types):
+                for mexpr_strings in self._infer_mexpr(in_nonterminal, nonterminal_types):
                     def replace_with_var(elem: str) -> str | language.Variable:
                         try:
                             return next(var for idx, var in enumerate(mexpr_ph.variables)
@@ -1103,11 +1112,7 @@ class InvariantLearner:
                         except StopIteration:
                             return elem
 
-                    mexpr_elements = [
-                        replace_with_var(token)
-                        for token in
-                        RE_NONTERMINAL.split(mexpr_str)
-                        if token]
+                    mexpr_elements = [replace_with_var(element) for element in mexpr_strings]
 
                     constructor = (
                         language.ForallFormula if isinstance(qfd_formula_w_mexpr_phs, language.ForallFormula)
@@ -1127,10 +1132,10 @@ class InvariantLearner:
     def _infer_mexpr(
             self,
             in_nonterminal: str,
-            nonterminal_types: Tuple[str, ...]) -> Set[str]:
+            nonterminal_types: Tuple[str, ...]) -> Set[Tuple[str, ...]]:
         assert all(self.graph.reachable(in_nonterminal, target) for target in nonterminal_types)
 
-        result: Set[str] = set([])
+        result: Set[Tuple[str, ...]] = set()
 
         candidate_trees: List[ParseTree] = [(in_nonterminal, None)]
         for i in range(self.mexpr_expansion_limit + 1):
@@ -1226,9 +1231,16 @@ class InvariantLearner:
                                 path,
                                 (get_subtree(bind_expr_tree, path)[0], None))
 
-                    result.add(tree_to_string(bind_expr_tree, show_open_leaves=True))
+                    result.add(tuple([tree[0] for _, tree in tree_leaves(bind_expr_tree)]))
 
-                candidate_trees.extend(expand_tree(tree, self.canonical_grammar))
+                expanded_trees = expand_tree(tree, self.canonical_grammar)
+                if self.max_nonterminals_in_mexpr is not None:
+                    expanded_trees = [
+                        t for t in expanded_trees
+                        if (len([True for _, leaf in tree_leaves(t) if is_nonterminal(leaf[0])]) <=
+                            self.max_nonterminals_in_mexpr)
+                    ]
+                candidate_trees.extend(expanded_trees)
 
         return result
 
@@ -1592,18 +1604,79 @@ def approximately_evaluate_abst_for(
             for path, subtree in sub_trie.values():
                 if subtree.value == formula.bound_variable.n_type:
                     new_assignments.append({formula.bound_variable: (in_path + path, subtree)})
+        elif isinstance(formula.bind_expression.bound_elements[0], MexprPlaceholderVariable):
+            mexpr_placeholder = cast(MexprPlaceholderVariable, formula.bind_expression.bound_elements[0])
+
+            # First, get all matches for the bound variables
+            new_assignments: List[Dict[language.Variable, Tuple[Path, language.DerivationTree]]] = []
+            for path, subtree in get_subtrie(trie, in_path).values():
+                if subtree.value == formula.bound_variable.n_type:
+                    new_assignments.append({formula.bound_variable: (in_path + path, subtree)})
+
+            # Next, find subtrees below those matches matching the mexpr placeholder in the correct order
+            for idx, placeholder_variable in enumerate(mexpr_placeholder.variables):
+                if not idx:
+                    for assignment in list(new_assignments):
+                        new_assignments.remove(assignment)
+
+                        sub_trie = get_subtrie(trie, assignment[formula.bound_variable][0])
+                        matches = [
+                            (in_path + path, subtree)
+                            for path, subtree in sub_trie.values()
+                            if subtree.value == placeholder_variable.n_type]
+                        if not matches:
+                            continue
+
+                        new_assignments.extend([
+                            assignment | {placeholder_variable: (path, subtree)}
+                            for path, subtree in matches
+                        ])
+                else:
+                    last_variable: NonterminalPlaceholderVariable = mexpr_placeholder.variables[idx - 1]
+                    for assignment in list(new_assignments):
+                        new_assignments.remove(assignment)
+
+                        sub_trie = get_subtrie(trie, assignment[formula.bound_variable][0])
+                        last_path: Path = assignment[last_variable][0]
+                        for sub_path_key in sub_trie.keys(path_to_trie_key(last_path)):
+                            del sub_trie[sub_path_key]
+
+                        next_key = next_trie_key(sub_trie, path_to_trie_key(last_path))
+                        if next_key is None:
+                            break
+                        sub_sub_trie = get_subtrie(sub_trie, next_key)
+
+                        matches = [
+                            (last_path + path, subtree)
+                            for path, subtree in sub_sub_trie.values()
+                            if subtree.value == placeholder_variable.n_type]
+                        if not matches:
+                            continue
+
+                        new_assignments.extend([
+                            assignment | {placeholder_variable: (path, subtree)}
+                            for path, subtree in matches
+                        ])
+
+            # For universal formulas, we only consider the first 3 new assignments
+            # to save time. After match expression placeholders are instantiated,
+            # we have the chance for a more precise check.
+            assert all(formula.bound_variable in assignment for assignment in new_assignments)
+            assert all(var in assignment for assignment in new_assignments for var in mexpr_placeholder.variables)
+            if isinstance(formula, language.ForallFormula):
+                new_assignments = new_assignments[:3]
         else:
             new_assignments = [
                 {var: (in_path + path, tree) for var, (path, tree) in new_assignment.items()}
                 for new_assignment in matches_for_quantified_formula(
                     formula, grammar, in_inst, {}, trie=get_subtrie(trie, in_path))]
 
+        if not new_assignments:
+            return ThreeValuedTruth.false()
+
         new_assignments = [
             new_assignment | assignments
             for new_assignment in new_assignments]
-
-        if not new_assignments:
-            return ThreeValuedTruth.false()
 
         if isinstance(formula, language.ExistsFormula):
             return ThreeValuedTruth.from_bool(any(
