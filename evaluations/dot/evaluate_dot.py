@@ -66,7 +66,7 @@ for url in urls:
         continue
 
     with urllib.request.urlopen(url) as f:
-        # The XML grammar is a little simplified, so we remove some elements.
+        # The DOT grammar does not contain comments, so we remove them.
         dot_code: str = f.read().decode('utf-8').strip()
         dot_code = re.sub(r"(^|\n)\s*//.*?(\n|$)", "", dot_code)
         dot_code = dot_code.replace("\\n", "\n")
@@ -118,12 +118,12 @@ result = InvariantLearner(
         "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
         "<LETTER>", "<maybe_minus>", "<maybe_comma>", "<maybe_semi>"
     }
-).learn_invariants(ensure_unique_var_names=False)
+).learn_invariants()
 
 print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
-best_invariant, (precision, recall) = next(iter(result.items()))
-print(f"Best invariant (*estimated* precision {precision:.2f}, recall {recall:.2f}):")
+best_invariant, (specificity, sensitivity) = next(iter(result.items()))
+print(f"Best invariant (*estimated* specificity {specificity:.2f}, sensitivity: {sensitivity:.2f}):")
 print(ISLaUnparser(best_invariant).unparse())
 
 # Generate inputs for validation
@@ -178,4 +178,4 @@ for inp in negative_validation_inputs:
     else:
         tn += 1
 
-print(f"TP: {tp} | TN: {tn} | FP: {fp} | FN: {fn}")
+print(f"TP: {tp} | FN: {fn} | FP: {fp} | TN: {tn}")

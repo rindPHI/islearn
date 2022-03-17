@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Set, Dict, Callable, Tuple, Iterable, Generator
+from typing import Set, Dict, Callable, Tuple, Iterable, Generator, Optional
 
 from fuzzingbook.Parser import canonical
 from grammar_graph import gg
@@ -166,14 +166,23 @@ class MutationFuzzer:
         assert inp.is_complete()
         return inp
 
-    def run(self, num_iterations=500, alpha: float = 0.1, extend_fragments: bool = True, yield_negative=False) -> \
-            Generator[DerivationTree, None, None]:
+    def run(
+            self,
+            num_iterations: Optional[int] = 500,
+            alpha: float = 0.1,
+            extend_fragments: bool = True,
+            yield_negative=False) -> Generator[DerivationTree, None, None]:
         unsuccessful_tries = 0
 
-        for i in range(num_iterations):
-            curr_alpha = 1 - (unsuccessful_tries / (i + 1))
-            if i * 10 > num_iterations and curr_alpha < alpha:
+        i = 0
+        while True:
+            if num_iterations is not None and i >= num_iterations:
                 break
+
+            curr_alpha = 1 - (unsuccessful_tries / (i + 1))
+            if curr_alpha < alpha:
+                if i * 10 > (num_iterations or 500):
+                    break
 
             inp = self.fuzz()
 

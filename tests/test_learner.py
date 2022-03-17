@@ -1560,6 +1560,89 @@ forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
 
         self.assertIn(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), candidates)
 
+    def test_racket_function_defuse_property_get_candidates(self):
+        racket_code = """
+#lang htdp/bsl
+(define (f x) x)
+(f 13)
+(* 1 2)
+(+ 1 2)
+""".strip()
+
+        positive_trees = [
+            language.DerivationTree.from_parse_tree(list(PEGParser(RACKET_BSL_GRAMMAR).parse(racket_code))[0])]
+
+        def prop(tree: language.DerivationTree) -> bool:
+            return load_racket(tree) is True
+
+        expected_defuse_property = """
+forall <expr> use_ctx="<maybe_comments><MWSS>(<MWSS>{<name> use}<wss_exprs><MWSS>)" in start:
+  ((= use "*") or (= use "+") or
+    exists <definition> def_ctx="(<MWSS>define<MWSS>(<MWSS>{<name> def}<WSS_NAMES><MWSS>)<MWSS><expr><MWSS>)" in start:
+      ((before(def_ctx, use_ctx) and
+      (= use def))))
+""".strip()
+
+        self.assertTrue(evaluate(
+            parse_isla(expected_defuse_property, structural_predicates={BEFORE_PREDICATE}),
+            positive_trees[0],
+            RACKET_BSL_GRAMMAR).is_true())
+
+        repo = patterns_from_file()
+        candidates = InvariantLearner(
+            RACKET_BSL_GRAMMAR,
+            prop,
+            mexpr_expansion_limit=1,
+            max_nonterminals_in_mexpr=9,
+            positive_examples={positive_trees[0]},
+            exclude_nonterminals={
+                "<maybe_wss_names>",
+                "<wss_exprs>",
+                "<maybe_cond_args>",
+                "<strings_mwss>",
+                "<NAME_CHAR>",
+                "<ONENINE>",
+                "<ESC_OR_NO_STRING_ENDINGS>",
+                "<ESC_OR_NO_STRING_ENDING>",
+                "<NO_STRING_ENDING>",
+                "<CHARACTER>",
+                "<DIGIT>",
+                "<LETTERORDIGIT>",
+                "<MWSS>",
+                "<WSS>",
+                "<WS>",
+                "<maybe_comments>",
+                "<COMMENT>",
+                "<HASHDIRECTIVE>",
+                "<NOBR>",
+                "<NOBRs>",
+                "<test_case>",
+                "<library_require>",
+                "<pkg>",
+                "<SYMBOL>",
+                "<NUMBER>",
+                "<DIGITS>",
+                "<MAYBE_DIGITS>",
+                "<INT>",
+                "<BOOLEAN>",
+                "<STRING>",
+                "<program>",  # TODO: Remove for evaluation
+                "<def_or_exprs>",  # TODO: Remove for evaluation
+                "<def_or_expr>",  # TODO: Remove for evaluation
+                "<cond_args>",  # TODO: Remove for evaluation
+            },
+        ).generate_candidates(
+            repo["Def-Use (reST Strict Reserved Names)"],
+            {positive_trees[0]}
+        )
+
+        print(len(candidates))
+        print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
+
+        self.assertTrue(any(
+            equivalent(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), inst)
+            for inst in candidates))
+
     def test_racket_defuse_property_get_candidates(self):
         # The racket syntax check is really expensive; therefore, reduction cannot be used efficiently.
         # Also, the HTDP examples are pretty small already.

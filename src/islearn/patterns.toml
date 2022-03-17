@@ -21,6 +21,27 @@ forall <?NONTERMINAL> use_ctx="{<?MATCHEXPR(use)>}" in start:
 
 [[Def-Use]]
 
+name = "Def-Use (reST Strict)"
+constraint = '''
+forall <?NONTERMINAL> use_ctx="{<?MATCHEXPR(use)>}" in start:
+  exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+    (before(def_ctx, use_ctx) and
+    (= use def))
+'''
+
+[[Def-Use]]
+
+name = "Def-Use (reST Strict Reserved Names)"
+constraint = '''
+forall <?NONTERMINAL> use_ctx="{<?MATCHEXPR(use)>}" in start:
+  ((= use <?DSTRINGS>) or
+   (exists <?NONTERMINAL> def_ctx="{<?MATCHEXPR(def)>}" in start:
+     (before(def_ctx, use_ctx) and
+     (= use def))))
+'''
+
+[[Def-Use]]
+
 name = "Def-Use (XML-Attr)"
 constraint = '''
 forall <?NONTERMINAL> attribute="{<?MATCHEXPR(prefix_use)>}" in start:
