@@ -164,106 +164,70 @@ negative_learning_inputs = negative_trees[:20]
 positive_validation_inputs = positive_trees[len(positive_trees) // 2:] + new_positive_trees
 negative_validation_inputs = negative_trees[20:]
 
-# for inp in learning_inputs:
-#     print("INPUT")
-#     print("=====\n")
-#     print(inp)
-
 # Learn invariants
-# result = InvariantLearner(
-#     RACKET_BSL_GRAMMAR,
-#     prop=prop,
-#     activated_patterns={
-#         "Def-Use (XML-Attr Disjunctive)",
-#         "Def-Use (reST Strict Reserved Names)",  # Deactivate this to evaluate w/o the custom extension to the catalog
-#     },
-#     positive_examples=learning_inputs,
-#     negative_examples=negative_learning_inputs,
-#     target_number_positive_samples=15,
-#     target_number_negative_samples=20,
-#     max_conjunction_size=2,
-#     max_disjunction_size=1,
-#     filter_inputs_for_learning_by_kpaths=False,
-#     min_recall=.8,
-#     min_precision=.8,
-#     reduce_inputs_for_learning=False,
-#     do_generate_more_inputs=False,
-#     mexpr_expansion_limit=1,
-#     max_nonterminals_in_mexpr=9,
-#     exclude_nonterminals={
-#         "<maybe_wss_names>",
-#         "<wss_exprs>",
-#         "<maybe_cond_args>",
-#         "<strings_mwss>",
-#         "<NAME_CHAR>",
-#         "<ONENINE>",
-#         "<ESC_OR_NO_STRING_ENDINGS>",
-#         "<ESC_OR_NO_STRING_ENDING>",
-#         "<NO_STRING_ENDING>",
-#         "<CHARACTER>",
-#         "<DIGIT>",
-#         "<LETTERORDIGIT>",
-#         "<MWSS>",
-#         "<WSS>",
-#         "<WS>",
-#         "<maybe_comments>",
-#         "<COMMENT>",
-#         "<HASHDIRECTIVE>",
-#         "<NOBR>",
-#         "<NOBRs>",
-#         "<test_case>",
-#         "<library_require>",
-#         "<pkg>",
-#         "<SYMBOL>",
-#         "<NUMBER>",
-#         "<DIGITS>",
-#         "<MAYBE_DIGITS>",
-#         "<INT>",
-#         "<BOOLEAN>",
-#         "<STRING>",
-#         "<program>",  # TODO: Remove for evaluation
-#         "<def_or_exprs>",  # TODO: Remove for evaluation
-#         "<def_or_expr>",  # TODO: Remove for evaluation
-#         "<cond_args>",  # TODO: Remove for evaluation
-#     }
-# ).learn_invariants()
-#
-# print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
-#
-# best_invariant, (specificity, sensitivity) = next(iter(result.items()))
-# print(f"Best invariant (*estimated* specificity {specificity:.2f}, sensitivity {sensitivity:.2f}):")
-# print(ISLaUnparser(best_invariant).unparse())
+result = InvariantLearner(
+    RACKET_BSL_GRAMMAR,
+    prop=prop,
+    activated_patterns={
+        "Def-Use (XML-Attr Disjunctive)",
+        "Def-Use (reST Strict Reserved Names)",  # Deactivate this to evaluate w/o the custom extension to the catalog
+    },
+    positive_examples=learning_inputs,
+    negative_examples=negative_learning_inputs,
+    target_number_positive_samples=15,
+    target_number_negative_samples=20,
+    max_conjunction_size=2,
+    max_disjunction_size=1,
+    filter_inputs_for_learning_by_kpaths=False,
+    min_recall=.8,
+    min_precision=.8,
+    reduce_inputs_for_learning=False,
+    do_generate_more_inputs=False,
+    mexpr_expansion_limit=1,
+    max_nonterminals_in_mexpr=9,
+    exclude_nonterminals={
+        "<maybe_wss_names>",
+        "<wss_exprs>",
+        "<maybe_cond_args>",
+        "<strings_mwss>",
+        "<NAME_CHAR>",
+        "<ONENINE>",
+        "<ESC_OR_NO_STRING_ENDINGS>",
+        "<ESC_OR_NO_STRING_ENDING>",
+        "<NO_STRING_ENDING>",
+        "<CHARACTER>",
+        "<DIGIT>",
+        "<LETTERORDIGIT>",
+        "<MWSS>",
+        "<WSS>",
+        "<WS>",
+        "<maybe_comments>",
+        "<COMMENT>",
+        "<HASHDIRECTIVE>",
+        "<NOBR>",
+        "<NOBRs>",
+        "<test_case>",
+        "<library_require>",
+        "<pkg>",
+        "<SYMBOL>",
+        "<NUMBER>",
+        "<DIGITS>",
+        "<MAYBE_DIGITS>",
+        "<INT>",
+        "<BOOLEAN>",
+        "<STRING>",
+        "<program>",  # TODO: Remove for evaluation
+        "<def_or_exprs>",  # TODO: Remove for evaluation
+        "<def_or_expr>",  # TODO: Remove for evaluation
+        "<cond_args>",  # TODO: Remove for evaluation
+    }
+).learn_invariants()
 
-best_invariant = parse_abstract_isla("""
-forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
-  ((= prefix_use "sqrt") or
-   (= prefix_use "string-append") or
-   (= prefix_use "substring") or
-   (= prefix_use "add-line") or
-   (= prefix_use "right-triangle") or
-   (= prefix_use "ellipse") or
-   (= prefix_use "rectangle") or
-   (= prefix_use "overlay/align/offset") or
-   (= prefix_use "overlay") or
-   (= prefix_use "or") or
-   (= prefix_use "not") or
-   (= prefix_use "cond") or
-   (= prefix_use "string?") or
-   (= prefix_use "number?") or
-   (= prefix_use "boolean?") or
-   (= prefix_use "image?") or
-   (= prefix_use "*") or
-   (= prefix_use "<=") or
-   (= prefix_use "-") or
-   (= prefix_use "string-length") or
-   (= prefix_use "+") or
-   (= prefix_use "string-ith") or
-  exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS><expr><MWSS>)" in start:
-    (inside(attribute, outer_tag) and
-    exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
-      (= prefix_use prefix_def)))
-""", RACKET_BSL_GRAMMAR)
+print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
+best_invariant, (specificity, sensitivity) = next(iter(result.items()))
+print(f"Best invariant (*estimated* specificity {specificity:.2f}, sensitivity {sensitivity:.2f}):")
+print(ISLaUnparser(best_invariant).unparse())
 
 # NOTE: The following semantic errors are not covered by our invariant:
 #       - "this function is not defined," e.g., for `(re2uire 2htdp/image)`
