@@ -176,17 +176,22 @@ class MutationFuzzer:
                 break
 
             inp = self.fuzz()
-            new_coverage = self.coverages_seen - self.coverages_of(inp)
 
-            if inp in self.population or not self.property(inp) or not new_coverage:
+            if self.process_new_input(inp, extend_fragments):
+                yield inp
+            else:
                 unsuccessful_tries += 1
                 if yield_negative:
                     yield inp
-                self.logger.debug("current alpha: %f, threshold: %f", curr_alpha, alpha)
-                continue
 
-            yield inp
-            self.coverages_seen.update(new_coverage)
-            self.population.add(inp)
-            if extend_fragments:
-                self.update_fragments(inp)
+    def process_new_input(self, inp: DerivationTree, extend_fragments: bool = True) -> bool:
+        new_coverage = self.coverages_seen - self.coverages_of(inp)
+        if inp in self.population or not self.property(inp) or not new_coverage:
+            return False
+
+        self.coverages_seen.update(new_coverage)
+        self.population.add(inp)
+        if extend_fragments:
+            self.update_fragments(inp)
+
+        return True

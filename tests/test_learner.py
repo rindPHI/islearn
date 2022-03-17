@@ -1357,6 +1357,8 @@ forall <expr> attribute="{<?MATCHEXPR(<name> prefix_use)>}" in start:
             RACKET_BSL_GRAMMAR,
             None,
             positive_examples={},
+            mexpr_expansion_limit=1,
+            max_nonterminals_in_mexpr=9,
             exclude_nonterminals={
                 "<maybe_wss_names>",
                 "<wss_exprs>",
@@ -1591,25 +1593,24 @@ forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
         expected_defuse_property = """
 forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
   ((((= prefix_use "*") or
-      (= prefix_use "sqrt")) or
-     (= prefix_use "+")) or
-  exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS>{<expr> contained_tree}<MWSS>)" in start:
+    (= prefix_use "+")) or
+   (= prefix_use "sqrt")) or
+  exists <definition> outer_tag="(<MWSS>define<MWSS>(<MWSS><name>{<WSS_NAMES> cont_attribute}<MWSS>)<MWSS><expr><MWSS>)" in start:
     (inside(attribute, outer_tag) and
     exists <NAME> def_attribute="{<NAME_CHARS> prefix_def}" in cont_attribute:
-      (= prefix_use prefix_def)))""".strip()
+      (= prefix_use prefix_def))))""".strip()
 
         self.assertTrue(evaluate(
             parse_isla(expected_defuse_property, structural_predicates={IN_TREE_PREDICATE}),
             positive_trees[0],
             RACKET_BSL_GRAMMAR).is_true())
 
-        ##############
-
         repo = patterns_from_file()
         candidates = InvariantLearner(
             RACKET_BSL_GRAMMAR,
             prop,
             mexpr_expansion_limit=1,
+            max_nonterminals_in_mexpr=9,
             positive_examples={positive_trees[0]},  # 8
             exclude_nonterminals={
                 "<maybe_wss_names>",
