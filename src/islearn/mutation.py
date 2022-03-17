@@ -192,6 +192,9 @@ class MutationFuzzer:
                 unsuccessful_tries += 1
                 if yield_negative:
                     yield inp
+                self.logger.debug("current alpha: %f, threshold: %f", curr_alpha, alpha)
+
+            i += 1
 
     def process_new_input(self, inp: DerivationTree, extend_fragments: bool = True) -> bool:
         new_coverage = self.coverages_seen - self.coverages_of(inp)
