@@ -16,6 +16,7 @@ from languages import ICMP_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)
 
+random = random.SystemRandom()
 
 def validate_icmp_ping(inp: language.DerivationTree | str | bytes) -> bool | str:
     if isinstance(inp, bytes):
@@ -96,7 +97,7 @@ def create_random_icmp_packet_inp():
     icmp_obj.message_code = random.randint(0, max_code[message_type])
 
     packet_bytes = list(bytearray(icmp_obj.packet))
-    if random.random() < .2:
+    if random.random() < .4:
         packet_bytes[2] = random.randint(0x0, 0xF)
         packet_bytes[3] = random.randint(0x0, 0xF)
 
@@ -109,10 +110,10 @@ def create_random_icmp_packet_inp():
 parser = PEGParser(ICMP_GRAMMAR)
 graph = gg.GrammarGraph.from_grammar(ICMP_GRAMMAR)
 
-positive_trees = [create_random_valid_icmp_ping_packet_inp() for _ in range(120)]
+positive_trees = [create_random_valid_icmp_ping_packet_inp() for _ in range(70)]
 
 negative_trees = []
-while len(negative_trees) < 120:
+while len(negative_trees) < 70:
     inp = create_random_icmp_packet_inp()
     if validate_icmp_ping(inp) is not True:
         negative_trees.append(inp)
