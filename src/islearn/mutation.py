@@ -10,6 +10,7 @@ from isla.helpers import is_nonterminal
 from isla.language import DerivationTree
 from isla.type_defs import Grammar, Path
 
+random = random.SystemRandom()
 
 class MutationFuzzer:
     """

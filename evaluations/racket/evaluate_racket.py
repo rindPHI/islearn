@@ -10,16 +10,14 @@ from fuzzingbook.Parser import PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
-from isla.language import DerivationTree, ISLaUnparser, parse_isla
+from isla.language import DerivationTree, ISLaUnparser
 
 from islearn.helpers import tree_in
-from islearn.language import parse_abstract_isla
 from islearn.learner import InvariantLearner
 from islearn.mutation import MutationFuzzer
 from languages import RACKET_BSL_GRAMMAR, load_racket
 
 logging.basicConfig(level=logging.DEBUG)
-
 
 def prop(tree: language.DerivationTree) -> bool:
     return load_racket(tree) is True
@@ -86,7 +84,7 @@ negative_trees = []
 
 # We run two mutation fuzzers and a grammar fuzzer in parallel
 mutation_fuzzer: MutationFuzzer = MutationFuzzer(RACKET_BSL_GRAMMAR, positive_trees, prop, k=3)
-mutate_fuzz = mutation_fuzzer.run(None, alpha=.1, yield_negative=True)
+mutate_fuzz = mutation_fuzzer.run(None, alpha=.01, yield_negative=True)
 
 grammar_fuzzer = isla.fuzzer.GrammarCoverageFuzzer(RACKET_BSL_GRAMMAR)
 
@@ -216,10 +214,6 @@ result = InvariantLearner(
         "<INT>",
         "<BOOLEAN>",
         "<STRING>",
-        "<program>",  # TODO: Remove for evaluation
-        "<def_or_exprs>",  # TODO: Remove for evaluation
-        "<def_or_expr>",  # TODO: Remove for evaluation
-        "<cond_args>",  # TODO: Remove for evaluation
     }
 ).learn_invariants()
 
