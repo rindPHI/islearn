@@ -110,10 +110,10 @@ def create_random_icmp_packet_inp():
 parser = PEGParser(ICMP_GRAMMAR)
 graph = gg.GrammarGraph.from_grammar(ICMP_GRAMMAR)
 
-positive_trees = [create_random_valid_icmp_ping_packet_inp() for _ in range(70)]
+positive_trees = [create_random_valid_icmp_ping_packet_inp() for _ in range(100)]
 
 negative_trees = []
-while len(negative_trees) < 70:
+while len(negative_trees) < 100:
     inp = create_random_icmp_packet_inp()
     if validate_icmp_ping(inp) is not True:
         negative_trees.append(inp)
@@ -121,11 +121,11 @@ while len(negative_trees) < 70:
 random.shuffle(positive_trees)
 random.shuffle(negative_trees)
 
-learning_inputs = positive_trees[:20]
-negative_learning_inputs = negative_trees[:20]
+learning_inputs = positive_trees[:50]
+negative_learning_inputs = negative_trees[:50]
 
-positive_validation_inputs = positive_trees[20:]
-negative_validation_inputs = negative_trees[20:]
+positive_validation_inputs = positive_trees[50:]
+negative_validation_inputs = negative_trees[50:]
 
 # Learn invariants
 result = InvariantLearner(

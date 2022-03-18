@@ -610,6 +610,9 @@ class InvariantLearner:
             int(self.min_precision * 100),
         )
 
+        # TODO: Sort within same recall / specificity values: Fewer disjunctions,
+        #       more common String constants... To optimize specificity further.
+
         return dict(
             cast(List[Tuple[language.Formula, Tuple[float, float]]],
                  sorted(result.items(),
