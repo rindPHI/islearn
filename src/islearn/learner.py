@@ -5,9 +5,7 @@ import itertools
 import logging
 import os.path
 import pkgutil
-import re
 import string
-import sys
 from abc import ABC
 from functools import lru_cache
 from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
@@ -21,8 +19,8 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate, matches_for_quantified_formula, implies
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
-    is_nonterminal, dict_of_lists_to_list_of_dicts, get_subtrie, trie_key_to_path, path_to_trie_key
-from isla.isla_predicates import reachable, is_before
+    is_nonterminal, dict_of_lists_to_list_of_dicts, get_subtrie, path_to_trie_key
+from isla.isla_predicates import reachable
 from isla.language import set_smt_auto_eval, ensure_unique_bound_variables
 from isla.solver import ISLaSolver
 from isla.three_valued_truth import ThreeValuedTruth
@@ -31,16 +29,15 @@ from isla.z3_helpers import z3_subst, evaluate_z3_expression, is_valid, \
     DomainError
 from pathos import multiprocessing as pmp
 
-from islearn.helpers import connected_chains, replace_formula_by_formulas, transitive_closure, tree_in, \
+from islearn.helpers import connected_chains, transitive_closure, tree_in, \
     is_int, is_float, e_assert
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
     NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
     AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression, DisjunctiveStringsPlaceholderVariable, \
     StringPlaceholderVariableTypes
 from islearn.mutation import MutationFuzzer
-from islearn.parse_tree_utils import replace_path, filter_tree, tree_to_string, expand_tree, tree_leaves, \
-    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, dict_tree_from_paths, dict_tree_to_tree, \
-    tree_from_paths, Tree, traverse_tree
+from islearn.parse_tree_utils import replace_path, expand_tree, tree_leaves, \
+    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, tree_from_paths, Tree
 from islearn.reducer import InputReducer
 
 STANDARD_PATTERNS_REPO = "patterns.toml"

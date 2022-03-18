@@ -36,14 +36,14 @@ toml_grammar = {
     "<floating_point>": ["<FLOAT>", "<INF>", "<NAN>"],
     "<bool>": ["<BOOLEAN>"],
     "<date_time>": ["<OFFSET_DATE_TIME>", "<LOCAL_DATE_TIME>", "<LOCAL_DATE>", "<LOCAL_TIME>"],
-    "<array>": ["[<opt_array_values><comment_or_nl>]"],
+    "<array>": ["[<opt_array_values><comment_nl_or_nl>]"],
     "<opt_array_values>": ["<array_values>", ""],
     "<array_values>": [
-        "<comment_or_nl><value><nl_or_comment><opt_comma>",
-        "<comment_or_nl><value><nl_or_comment>,<array_values><comment_or_nl>"
+        "<comment_nl_or_nl><value><nl_or_comment><opt_comma>",
+        "<comment_nl_or_nl><value><nl_or_comment>,<array_values><comment_nl_or_nl>"
     ],
     "<opt_comma>": [",", ""],
-    "<comment_or_nl>": ["<COMMENT><NL><comment_or_nl>", "<NL><comment_or_nl>", "<COMMENT><NL>", "<NL>", ""],
+    "<comment_nl_or_nl>": ["<COMMENT><NL><comment_nl_or_nl>", "<NL><comment_nl_or_nl>", "<COMMENT><NL>", "<NL>", ""],
     "<nl_or_comment>": ["<NL><COMMENT><nl_or_comment>", "<NL><nl_or_comment>", "<NL><COMMENT>", "<NL>", ""],
     "<table>": ["<standard_table>", "<array_table>"],
     "<standard_table>": ["[<key>]"],
@@ -379,7 +379,7 @@ RACKET_BSL_GRAMMAR = {
         "<maybe_comments><MWSS>(<MWSS>and<WSS><expr><wss_exprs><MWSS>)",
         "<maybe_comments><MWSS>(<MWSS>or<WSS><expr><wss_exprs><MWSS>)",
         "<maybe_comments><MWSS>(<MWSS><name><wss_exprs><MWSS>)",
-        "<maybe_comments><MWSS>’()",
+        "<maybe_comments><MWSS>'()",
         "<maybe_comments><MWSS><STRING>",
         "<maybe_comments><MWSS><NUMBER>",
         "<maybe_comments><MWSS><BOOLEAN>",
@@ -419,7 +419,7 @@ RACKET_BSL_GRAMMAR = {
     # Original expression: ([$%&!*+\\^_~]|[--:<-Za-z])+
     "<NAME>": ["<NAME_CHARS>"],
     "<NAME_CHARS>": ["<NAME_CHAR><NAME_CHARS>", "<NAME_CHAR>"],
-    "<NAME_CHAR>": srange("$%&!*+\\^_~-:<>") + crange("-", ":") + crange("<", "Z") + crange("a", "z"),
+    "<NAME_CHAR>": srange("$%&!*+\\^_~") + crange("-", ":") + crange("<", "Z") + crange("a", "z"),
 
     # A number is a number such as 123, 3/2, or 5.5.
     "<NUMBER>": [
@@ -456,14 +456,14 @@ RACKET_BSL_GRAMMAR = {
     "<WS>": [" ", "\t", "\n"],
 
     "<maybe_comments>": ["<COMMENT><MWSS><maybe_comments>", ""],
-    "<COMMENT>": [";<NOBRs>"],
+    "<COMMENT>": [";<NOBRs>\n"],
     "<HASHDIRECTIVE>": ["#lang <NOBRs>", "#reader<NOBRs>"],
     "<NOBR>": list(set(string.printable) - {"\n", "\r"}),
     "<NOBRs>": ["<NOBR><NOBRs>", "<NOBR>"],
 }
 
 
-def load_racket(tree: language.DerivationTree) -> bool | str:
+def load_racket(tree: language.DerivationTree | str) -> bool | str:
     with tempfile.NamedTemporaryFile(suffix=".rk") as tmp:
         tmp.write(str(tree).encode())
         tmp.flush()
@@ -476,7 +476,13 @@ def load_racket(tree: language.DerivationTree) -> bool | str:
         err_msg = stderr.decode("utf-8")
         has_error = exit_code != 0 or (bool(err_msg) and "read-syntax" in err_msg)
 
-        if has_error:
-            print(err_msg)
+        # if has_error:
+        #     print("===== ERROR =====")
+        #     print("Program:")
+        #     print(tree)
+        #     print()
+        #     print("Message:")
+        #     print(err_msg)
+        #     print("=================")
 
         return True if not has_error else err_msg

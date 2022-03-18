@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Set, Dict, Callable, Tuple, Iterable, Generator
+from typing import Set, Dict, Callable, Tuple, Iterable, Generator, Optional
 
 from fuzzingbook.Parser import canonical
 from grammar_graph import gg
@@ -10,6 +10,7 @@ from isla.helpers import is_nonterminal
 from isla.language import DerivationTree
 from isla.type_defs import Grammar, Path
 
+random = random.SystemRandom()
 
 class MutationFuzzer:
     """
@@ -166,27 +167,44 @@ class MutationFuzzer:
         assert inp.is_complete()
         return inp
 
-    def run(self, num_iterations=500, alpha: float = 0.1, extend_fragments: bool = True, yield_negative=False) -> \
-            Generator[DerivationTree, None, None]:
+    def run(
+            self,
+            num_iterations: Optional[int] = 500,
+            alpha: float = 0.1,
+            extend_fragments: bool = True,
+            yield_negative=False) -> Generator[DerivationTree, None, None]:
         unsuccessful_tries = 0
 
-        for i in range(num_iterations):
-            curr_alpha = 1 - (unsuccessful_tries / (i + 1))
-            if i * 10 > num_iterations and curr_alpha < alpha:
+        i = 0
+        while True:
+            if num_iterations is not None and i >= num_iterations:
                 break
 
-            inp = self.fuzz()
-            new_coverage = self.coverages_seen - self.coverages_of(inp)
+            curr_alpha = 1 - (unsuccessful_tries / (i + 1))
+            if curr_alpha < alpha:
+                if i * 10 > (num_iterations or 500):
+                    break
 
-            if inp in self.population or not self.property(inp) or not new_coverage:
+            inp = self.fuzz()
+
+            if self.process_new_input(inp, extend_fragments):
+                yield inp
+            else:
                 unsuccessful_tries += 1
                 if yield_negative:
                     yield inp
                 self.logger.debug("current alpha: %f, threshold: %f", curr_alpha, alpha)
-                continue
 
-            yield inp
-            self.coverages_seen.update(new_coverage)
-            self.population.add(inp)
-            if extend_fragments:
-                self.update_fragments(inp)
+            i += 1
+
+    def process_new_input(self, inp: DerivationTree, extend_fragments: bool = True) -> bool:
+        new_coverage = self.coverages_seen - self.coverages_of(inp)
+        if inp in self.population or not self.property(inp) or not new_coverage:
+            return False
+
+        self.coverages_seen.update(new_coverage)
+        self.population.add(inp)
+        if extend_fragments:
+            self.update_fragments(inp)
+
+        return True
