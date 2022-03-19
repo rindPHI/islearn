@@ -239,7 +239,7 @@ class InvariantLearner:
             mexpr_expansion_limit: int = 1,
             max_nonterminals_in_mexpr: Optional[int] = None,
             min_recall: float = .9,
-            min_precision: float = .6,
+            min_specificity: float = .6,
             max_disjunction_size: int = 1,
             max_conjunction_size: int = 2,
             exclude_nonterminals: Optional[Iterable[str]] = None,
@@ -270,7 +270,7 @@ class InvariantLearner:
         self.mexpr_expansion_limit = mexpr_expansion_limit
         self.max_nonterminals_in_mexpr = max_nonterminals_in_mexpr
         self.min_recall = min_recall
-        self.min_precision = min_precision
+        self.min_specificity = min_specificity
         self.max_disjunction_size = max_disjunction_size
         self.max_conjunction_size = max_conjunction_size
         self.exclude_nonterminals = exclude_nonterminals or set([])
@@ -578,7 +578,7 @@ class InvariantLearner:
                 # an improvement over all participants of the conjunction
                 conjunction = functools.reduce(TruthTableRow.__and__, precision_table_rows)
                 new_precision = 1 - conjunction.eval_result()
-                if (new_precision < self.min_precision or
+                if (new_precision < self.min_specificity or
                         not all(new_precision > 1 - row.eval_result() for row in precision_table_rows)):
                     continue
 
@@ -600,15 +600,18 @@ class InvariantLearner:
             else language.ensure_unique_bound_variables(precision_row.formula):
                 (1 - precision_row.eval_result(), recall_truth_table[idx].eval_result())
             for idx, precision_row in enumerate(precision_truth_table)
-            if (1 - precision_row.eval_result() >= self.min_precision and
+            if (1 - precision_row.eval_result() >= self.min_specificity and
                 recall_truth_table[idx].eval_result() >= self.min_recall)
         }
 
         logger.info(
             "Found %d invariants with precision >= %d%%.",
-            len([p for p in result.values() if p[0] >= self.min_precision]),
-            int(self.min_precision * 100),
+            len([p for p in result.values() if p[0] >= self.min_specificity]),
+            int(self.min_specificity * 100),
         )
+
+        # TODO: Sort within same recall / specificity values: Fewer disjunctions,
+        #       more common String constants... To optimize specificity further.
 
         return dict(
             cast(List[Tuple[language.Formula, Tuple[float, float]]],
@@ -1425,6 +1428,9 @@ class InvariantLearner:
                for placeholder in get_placeholders(inst_pattern)):
             return dict.fromkeys(inst_patterns)
 
+        # TODO: Record fragments inside their *contexts*, and only instantiate in the right context.
+        #       An <ID> in at the place of a function name is different than an <ID> at the place of
+        #       a variable.
         fragments: Dict[str, Set[str]] = {nonterminal: set([]) for nonterminal in self.grammar}
         for trie in tries:
             remaining_paths: List[Tuple[Path, language.DerivationTree]] = list(

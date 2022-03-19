@@ -183,7 +183,7 @@ x
             mexpr_expansion_limit=2,
             k=4,  # TODO: Consider *all* k-paths *up to* 4?
             max_conjunction_size=1,
-            min_precision=.0,
+            min_specificity=.0,
         ).learn_invariants()
 
         print(len(result))
@@ -236,7 +236,7 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
             activated_patterns={"Balance"},
             positive_examples=inputs,
             mexpr_expansion_limit=2,
-            min_precision=.3  # Low precision needed because inv holds trivially for self-closing tags
+            min_specificity=.3  # Low precision needed because inv holds trivially for self-closing tags
         ).learn_invariants()
 
         print(len(result))
@@ -1088,7 +1088,7 @@ forall <ip_message> container in start:
             filter_inputs_for_learning_by_kpaths=False,
             max_conjunction_size=2,
             min_recall=1,
-            min_precision=1,
+            min_specificity=1,
             # reduce_all_inputs=True,
             reduce_inputs_for_learning=True,
             generate_new_learning_samples=False,
