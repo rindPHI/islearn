@@ -142,7 +142,7 @@ result = InvariantLearner(
     filter_inputs_for_learning_by_kpaths=False,
     do_generate_more_inputs=False,
     min_recall=1,
-    min_precision=.7,
+    min_specificity=.7,
 ).learn_invariants()
 
 print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
