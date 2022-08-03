@@ -14,7 +14,6 @@ import datrie
 import isla.fuzzer
 import toml
 import z3
-from fuzzingbook.Parser import canonical
 from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate, matches_for_quantified_formula, implies

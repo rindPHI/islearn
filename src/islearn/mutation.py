@@ -2,11 +2,10 @@ import logging
 import random
 from typing import Set, Dict, Callable, Tuple, Iterable, Generator, Optional
 
-from fuzzingbook.Parser import canonical
 from grammar_graph import gg
 from isla.existential_helpers import paths_between, path_to_tree
 from isla.fuzzer import GrammarCoverageFuzzer
-from isla.helpers import is_nonterminal
+from isla.helpers import is_nonterminal, canonical
 from isla.language import DerivationTree
 from isla.type_defs import Grammar, Path
 

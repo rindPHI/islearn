@@ -91,7 +91,7 @@ invariants or to quicker results.
 | min_specificity                             | .6         | What is the minimum target specificity value?                                                                |
 | max_disjunction_size                        | 1          | Size of disjunctions to be generated. As default, no disjunctions (size 1). Potentially increases recall.    |
 | include_negations_in_disjunctions           | False      | Also include negations in literals within disjunctions. Use with case; can lead to "spurious" invariants.    |
-| max_conjunction_size                        | 2          | Size of conjunctions to be generated. As default, conjunctions of size 1. Potentially increases specificity. |
+| max_conjunction_size                        | 2          | Size of conjunctions to be generated. As default, conjunctions of size 2. Potentially increases specificity. |
 | activated_patterns                          | None       | A set of pattern names from the catalog that should be selected. As a default, all patterns are selected.    |
 | deactivated_patterns                        | None       | A set of pattern names from the catalog that should *not* be selected.                                       |
 | pattern_file                                | None       | A file name to a pattern catalog (TOML file). Standard is `src/islearn/patterns.toml`.                       |

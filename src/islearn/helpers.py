@@ -5,7 +5,6 @@ from functools import reduce
 from typing import Callable, TypeVar, Optional, Iterable, Tuple, Set, List, Dict, Sequence
 
 import isla.language
-from isla.type_defs import Path
 from pathos import multiprocessing as pmp
 
 S = TypeVar("S")

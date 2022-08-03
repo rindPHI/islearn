@@ -18,6 +18,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 random = random.SystemRandom()
 
+
 def validate_icmp_ping(inp: language.DerivationTree | str | bytes) -> bool | str:
     if isinstance(inp, bytes):
         bytes_input = inp
@@ -107,63 +108,64 @@ def create_random_icmp_packet_inp():
         PEGParser(ICMP_GRAMMAR).parse(icmp_packet_hex_dump + " ")[0])
 
 
-parser = PEGParser(ICMP_GRAMMAR)
-graph = gg.GrammarGraph.from_grammar(ICMP_GRAMMAR)
+if __name__ == "__main__":
+    parser = PEGParser(ICMP_GRAMMAR)
+    graph = gg.GrammarGraph.from_grammar(ICMP_GRAMMAR)
 
-positive_trees = [create_random_valid_icmp_ping_packet_inp() for _ in range(100)]
+    positive_trees = [create_random_valid_icmp_ping_packet_inp() for _ in range(100)]
 
-negative_trees = []
-while len(negative_trees) < 100:
-    inp = create_random_icmp_packet_inp()
-    if validate_icmp_ping(inp) is not True:
-        negative_trees.append(inp)
+    negative_trees = []
+    while len(negative_trees) < 100:
+        inp = create_random_icmp_packet_inp()
+        if validate_icmp_ping(inp) is not True:
+            negative_trees.append(inp)
 
-random.shuffle(positive_trees)
-random.shuffle(negative_trees)
+    random.shuffle(positive_trees)
+    random.shuffle(negative_trees)
 
-learning_inputs = positive_trees[:50]
-negative_learning_inputs = negative_trees[:50]
+    learning_inputs = positive_trees[:50]
+    negative_learning_inputs = negative_trees[:50]
 
-positive_validation_inputs = positive_trees[50:]
-negative_validation_inputs = negative_trees[50:]
+    positive_validation_inputs = positive_trees[50:]
+    negative_validation_inputs = negative_trees[50:]
 
-# Learn invariants
-result = InvariantLearner(
-    ICMP_GRAMMAR,
-    prop=None,
-    activated_patterns={
-        # "Checksums",
-        "String Existence",
-    },
-    positive_examples=learning_inputs,
-    negative_examples=negative_learning_inputs,
-    max_disjunction_size=2,
-    max_conjunction_size=2,
-    filter_inputs_for_learning_by_kpaths=False,
-    do_generate_more_inputs=False,
-    min_recall=1,
-    min_specificity=.7,
-).learn_invariants()
+    # Learn invariants
+    result = InvariantLearner(
+        ICMP_GRAMMAR,
+        prop=None,
+        activated_patterns={
+            # "Checksums",
+            "String Existence",
+        },
+        positive_examples=learning_inputs,
+        negative_examples=negative_learning_inputs,
+        max_disjunction_size=2,
+        max_conjunction_size=2,
+        filter_inputs_for_learning_by_kpaths=False,
+        do_generate_more_inputs=False,
+        min_recall=1,
+        min_specificity=.7,
+    ).learn_invariants()
 
-print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
+    print("\n".join(map(lambda p: f"{p[1]}: " + ISLaUnparser(p[0]).unparse(), result.items())))
 
-best_invariant, (specificity, sensitivity) = next(iter(result.items()))
-print(f"Best invariant (*estimated* specificity {specificity:.2f}, sensitivity {sensitivity:.2f}):")
-print(ISLaUnparser(best_invariant).unparse())
+    best_invariant, (specificity, sensitivity) = next(iter(result.items()))
+    print(f"Best invariant (*estimated* specificity {specificity:.2f}, sensitivity {sensitivity:.2f}):")
+    print(ISLaUnparser(best_invariant).unparse())
 
-# Finally, obtain confusion matrix entries.
-tp, tn, fp, fn = 0, 0, 0, 0
+    # Finally, obtain confusion matrix entries.
+    tp, tn, fp, fn = 0, 0, 0, 0
 
-for inp in positive_validation_inputs:
-    if evaluate(best_invariant, inp, ICMP_GRAMMAR, graph=graph).is_true():
-        tp += 1
-    else:
-        fn += 1
+    for inp in positive_validation_inputs:
+        if evaluate(best_invariant, inp, ICMP_GRAMMAR, graph=graph).is_true():
+            tp += 1
+        else:
+            fn += 1
 
-for inp in negative_validation_inputs:
-    if evaluate(best_invariant, inp, ICMP_GRAMMAR, graph=graph).is_true():
-        fp += 1
-    else:
-        tn += 1
+    for inp in negative_validation_inputs:
+        if evaluate(best_invariant, inp, ICMP_GRAMMAR, graph=graph).is_true():
+            fp += 1
+        else:
+            tn += 1
 
-print(f"TP: {tp} | FN: {fn} | FP: {fp} | TN: {tn}")
+    print(f"TP: {tp} | FN: {fn} | FP: {fp} | TN: {tn}")

@@ -7,7 +7,7 @@ from islearn.helpers import parallel_all, parallel_any
 
 
 class TestHelpers(unittest.TestCase):
-    @pytest.mark.skip(msg="Doesn't work in CI")
+    @pytest.mark.skip("Doesn't work in CI")
     def test_parallel_all(self):
         def pred(n: int) -> bool:
             sleep(.005)
@@ -37,7 +37,7 @@ class TestHelpers(unittest.TestCase):
 
         self.assertGreater(all_time, 8 * parallel_all_time)
 
-    @pytest.mark.skip(msg="Doesn't work in CI")
+    @pytest.mark.skip("Doesn't work in CI")
     def test_parallel_any(self):
         def pred(n: int) -> bool:
             sleep(.005)
