@@ -1896,7 +1896,7 @@ class PatternRepository:
         all_patterns: Set[language.Formula] = set(
             functools.reduce(set.__or__, [set(d.values()) for d in self.groups.values()]))
 
-        return all_patterns.intersection(exclude)
+        return all_patterns - exclude
 
     def __str__(self):
         result = ""
