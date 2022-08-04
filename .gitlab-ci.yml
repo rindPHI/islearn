@@ -1,4 +1,4 @@
-image: dsteinhoefel/islearn:latest
+image: python:latest
 
 # Change pip's cache directory to be inside the project directory since we can
 # only cache local items.
@@ -6,11 +6,16 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 before_script:
-  - pip install --prefix=$(python3 -m site --user-base) --no-cache-dir --upgrade pip
-  - pip install --prefix=$(python3 -m site --user-base) --no-cache-dir --upgrade wheel
-  - pip uninstall -y isla
-  - cat requirements.txt | grep -v z3 > requirements_noz3.txt
-  - pip install --prefix=$(python3 -m site --user-base) --no-cache-dir --no-deps -r requirements_noz3.txt
+  - apt update && apt install -y clang python3-dev curl
+  - curl -L https://github.com/Clever/csvlint/releases/download/v0.3.0/csvlint-v0.3.0-linux-amd64.tar.gz | tar xz --strip-components 1 && mv csvlint /bin/
+  - csvlint --help  # Print out csvlint help for debugging
+  - python -V  # Print out python version for debugging
+  - pip install --upgrade pip
+  - pip install virtualenv
+  - virtualenv venv
+  - source venv/bin/activate
+  - pip install docutils
+  - pip install -e .[test]
 
 test:
   script:
