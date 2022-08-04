@@ -14,13 +14,14 @@ before_script:
   - pip install virtualenv
   - virtualenv venv
   - source venv/bin/activate
-  - pip install docutils
-  - pip install -e .[test]
+  - pip install --upgrade pip
+  - pip install --upgrade -e .[test]
 
 test:
   script:
-    - pip install --no-cache-dir --prefix=$(python3 -m site --user-base) --no-deps -e .[tests]
-    - python3 -m pytest -n 16 --html=report.html --self-contained-html
+    #- pip install --no-cache-dir --prefix=$(python3 -m site --user-base) --no-deps -e .[test]
+    - pytest -n 16 --html=report.html --self-contained-html --cov=isla tests/ --cov-config=.coveragerc
+    #- python3 -m pytest -n 16 --html=report.html --self-contained-html
 
 build:
   script:

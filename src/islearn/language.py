@@ -9,7 +9,8 @@ from antlr4 import InputStream
 from isla import language
 from isla.isla_predicates import STANDARD_STRUCTURAL_PREDICATES, STANDARD_SEMANTIC_PREDICATES
 from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, VariableManager, Variable, Formula, \
-    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter, BailPrintErrorStrategy
+    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter, BailPrintErrorStrategy, \
+    ensure_unique_bound_variables, VariablesCollector
 from isla.type_defs import Grammar
 from isla.z3_helpers import get_symbols, smt_expr_to_str
 from orderedset import OrderedSet
@@ -235,6 +236,27 @@ class AbstractISLaEmitter(ISLaEmitter):
 
     def enterStart(self, ctx: IslaLanguageParser.StartContext):
         self.used_variables = used_variables_in_concrete_syntax(ctx)
+
+    def exitStart(self, ctx: IslaLanguageParser.StartContext):
+        try:
+            formula: Formula = self.mgr.create(self.formulas[ctx.formula()])
+            formula = ensure_unique_bound_variables(formula)
+            self.used_variables.update({var.name for var in VariablesCollector.collect(formula)})
+            self.result = \
+                self.close_over_xpath_expressions(
+                    self.close_over_free_nonterminals(formula))
+
+            # NOTE: We're skipping the free variables check from the standard `ISLaEmitter`
+            #       since placeholders and variables in match expression placeholders would
+            #       also show up (the latter would be a little tricky to distinguish from
+            free_variables = [
+                var for var in self.result.free_variables()
+                if not isinstance(var, language.Constant)
+                   and not isinstance(var, PlaceholderVariable)]
+            if free_variables:
+                raise SyntaxError('Unbound variables: ' + ', '.join(map(str, free_variables)))
+        except RuntimeError as exc:
+            raise SyntaxError(str(exc))
 
     def exitPredicateArg(self, ctx: IslaLanguageParser.PredicateArgContext):
         text = parse_tree_text(ctx)
