@@ -47,10 +47,10 @@ from isla.type_defs import ParseTree
 
 def eval_lang(inp: str) -> Dict[str, int]:
     def assgnlhs(assgn: ParseTree):
-        return tree_to_string(get_subtree((0,), assgn))
+        return tree_to_string(get_subtree(assgn, (0,)))
 
     def assgnrhs(assgn: ParseTree):
-        return tree_to_string(get_subtree((2,), assgn))
+        return tree_to_string(get_subtree(assgn, (2,)))
 
     valueMap: Dict[str, int] = {}
     tree = list(EarleyParser(LANG_GRAMMAR).parse(inp))[0]
@@ -68,7 +68,6 @@ def eval_lang(inp: str) -> Dict[str, int]:
     dfs(tree, evalAssignments)
 
     return valueMap
-
 
 def validate_lang(inp: DerivationTree) -> bool:
     try:
@@ -103,9 +102,10 @@ print("\n".join(map(
 The expected result is
 
 ```
-(1.0, 1.0): forall <assgn> assgn_1="{<var> lhs_1} := {<var> var}" in start:
-  exists <assgn> assgn_2="{<var> lhs_2} := {<rhs> rhs_2}" in start:
-    (before(assgn_2, assgn_1) and (= lhs_2 var))
+(1.0, 1.0): forall <rhs> use_ctx="{<var> use}" in start:
+  exists <assgn> def_ctx="{<var> def} := <rhs>" in start:
+    (before(def_ctx, use_ctx) and
+    (= use def))
 ```
 
 That invariant has full specificity (first value in the tuple) and recall
