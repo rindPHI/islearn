@@ -1,6 +1,7 @@
 import unittest
 
 from isla import language
+from isla_formalizations import xml_lang
 
 from islearn.language import parse_abstract_isla, AbstractISLaUnparser
 
@@ -75,6 +76,17 @@ forall <?NONTERMINAL> attribute in start:
         self.assertEqual(
             pattern.strip(),
             AbstractISLaUnparser(parse_abstract_isla(pattern)).unparse())
+
+    def test_parse_match_expressions_with_instantiated_arguments(self):
+        parse_abstract_isla("""
+forall <xml-tree> xml_tree="{<?MATCHEXPR(<id-no-prefix> prefix_use)>}" in start:
+  exists <xml-tree> outer_tag="{<?MATCHEXPR(<xml-attribute> cont_attribute)>}" in start:
+    (inside(xml_tree, outer_tag) and
+     exists <xml-attribute> def_attribute="{<?MATCHEXPR(<id-no-prefix> ns_prefix, <id-no-prefix> prefix_def)>}" 
+         in cont_attribute:
+       ((= ns_prefix <?STRING>) and
+        (= prefix_use prefix_def)))
+""", xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES)
 
 
 if __name__ == '__main__':

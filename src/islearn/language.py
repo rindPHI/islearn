@@ -99,6 +99,16 @@ class AbstractBindExpression(language.BindExpression):
             language.BoundVariable |
             List[language.BoundVariable]] = self.bound_elements
 
+    def bound_variables(self) -> OrderedSet[language.BoundVariable]:
+        # Not isinstance(var, BoundVariable) since we want to exclude dummy variables
+        result = OrderedSet([var for var in self.bound_elements if type(var) is language.BoundVariable])
+        result.update([
+            var for mexpr_ph in self.bound_elements
+            if isinstance(mexpr_ph, MexprPlaceholderVariable)
+            for var in mexpr_ph.variables
+            if isinstance(var, language.BoundVariable)])
+        return result
+
     def substitute_variables(self, subst_map: Dict[Variable, Variable]) -> 'AbstractBindExpression':
         return AbstractBindExpression(
             *[elem if isinstance(elem, list)
