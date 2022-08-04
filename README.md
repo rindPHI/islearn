@@ -112,15 +112,14 @@ invariants or to quicker results.
 
 ## Install, Build, Test
 
-ISLearn depends on Python 3.10 and the Python header files (from package python3.10-dev in Ubuntu Linux). Furthermore,
-python3.10-venv is required to run ISLa in a virtual environment.
+ISLearn depends on Python 3.10 and the Python header files. To compile all of ISLearns's dependencies, you need
+gcc, g++ make, and cmake. To check out the current ISLearn version, git will be needed. Furthermore, 
+python3.10-venv is required to run ISLearn in a virtual environment.
 
-On Ubuntu Linux, the dependencies can be installed using
+On *Alpine Linux*, all dependencies can be installed using
 
 ```shell
-sudo apt-get update
-sudo apt-get upgrade
-sudo apt-get install python3.10 python3.10-dev python3.10-venv
+apk add python3.10 python3.10-dev python3.10-venv gcc g++ make cmake git 
 ```
 
 ### Install
@@ -131,8 +130,8 @@ environment (virtualenv):
 ```shell
 python3.10 -m venv venv
 source venv/bin/activate
-pip3 install --upgrade pip
-pip3 install islearn
+pip install --upgrade pip
+pip install islearn
 ```
 
 ### Build 
@@ -146,8 +145,8 @@ cd islearn/
 python3.10 -m venv venv
 source venv/bin/activate
 
-pip3 install --upgrade pip
-pip3 install --upgrade build
+pip install --upgrade pip
+pip install --upgrade build
 python3 -m build
 ```
 
@@ -172,9 +171,9 @@ cd islearn/
 
 python3.10 -m venv venv
 source venv/bin/activate
-pip3 install --upgrade pip
+pip install --upgrade pip
 
 # Run tests
-pip3 install -e .[test]
+pip install -e .[test]
 python3 -m pytest -n 16 tests
 ```
