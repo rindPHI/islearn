@@ -9,10 +9,12 @@ from antlr4 import InputStream
 from isla import language
 from isla.isla_predicates import STANDARD_STRUCTURAL_PREDICATES, STANDARD_SEMANTIC_PREDICATES
 from isla.language import ISLaEmitter, StructuralPredicate, SemanticPredicate, VariableManager, Variable, Formula, \
-    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter
+    parse_tree_text, antlr_get_text_with_whitespace, ISLaUnparser, MExprEmitter, BailPrintErrorStrategy
 from isla.type_defs import Grammar
 from isla.z3_helpers import get_symbols, smt_expr_to_str
+from orderedset import OrderedSet
 
+from islearn.isla_language import IslaLanguageListener
 from islearn.islearn_predicates import INTERNET_CHECKSUM_PREDICATE, HEX_TO_DEC_PREDICATE
 from islearn.isla_language.IslaLanguageLexer import IslaLanguageLexer
 from islearn.isla_language.IslaLanguageParser import IslaLanguageParser
@@ -164,6 +166,60 @@ class AbstractVariableManager(VariableManager):
         return f"{prefix}_{idx}"
 
 
+def used_variables_in_concrete_syntax(inp: str | IslaLanguageParser.StartContext) -> OrderedSet[str]:
+    if isinstance(inp, str):
+        lexer = IslaLanguageLexer(InputStream(inp))
+        parser = IslaLanguageParser(antlr4.CommonTokenStream(lexer))
+        parser._errHandler = BailPrintErrorStrategy()
+        context = parser.start()
+    else:
+        assert isinstance(inp, IslaLanguageParser.StartContext)
+        context = inp
+
+    collector = ConcreteSyntaxUsedVariablesCollector()
+    antlr4.ParseTreeWalker().walk(collector, context)
+    return collector.used_variables
+
+
+class ConcreteSyntaxUsedVariablesCollector(IslaLanguageListener.IslaLanguageListener):
+    def __init__(self):
+        self.used_variables: OrderedSet[str] = OrderedSet()
+
+    def collect_used_variables_in_mexpr(self, inp: str) -> None:
+        lexer = MexprLexer(InputStream(inp))
+        parser = MexprParser(antlr4.CommonTokenStream(lexer))
+        parser._errHandler = BailPrintErrorStrategy()
+        collector = ConcreteSyntaxMexprUsedVariablesCollector()
+        antlr4.ParseTreeWalker().walk(collector, parser.matchExpr())
+        self.used_variables.update(collector.used_variables)
+
+    def enterForall(self, ctx: IslaLanguageParser.ForallContext):
+        if ctx.varId:
+            self.used_variables.add(parse_tree_text(ctx.varId))
+
+    def enterForallMexpr(self, ctx: IslaLanguageParser.ForallMexprContext):
+        if ctx.varId:
+            self.used_variables.add(parse_tree_text(ctx.varId))
+        self.collect_used_variables_in_mexpr(antlr_get_text_with_whitespace(ctx.STRING())[1:-1])
+
+    def enterExists(self, ctx: IslaLanguageParser.ExistsContext):
+        if ctx.varId:
+            self.used_variables.add(parse_tree_text(ctx.varId))
+
+    def enterExistsMexpr(self, ctx: IslaLanguageParser.ExistsMexprContext):
+        if ctx.varId:
+            self.used_variables.add(parse_tree_text(ctx.varId))
+        self.collect_used_variables_in_mexpr(antlr_get_text_with_whitespace(ctx.STRING())[1:-1])
+
+
+class ConcreteSyntaxMexprUsedVariablesCollector(MexprParserListener.MexprParserListener):
+    def __init__(self):
+        self.used_variables: OrderedSet[str] = OrderedSet()
+
+    def enterMatchExprVar(self, ctx: MexprParser.MatchExprVarContext):
+        self.used_variables.add(parse_tree_text(ctx.ID()))
+
+
 class AbstractISLaEmitter(ISLaEmitter):
     def __init__(
             self,
@@ -177,6 +233,9 @@ class AbstractISLaEmitter(ISLaEmitter):
         self.next_string_placeholder_index = 1
         self.next_dstrings_placeholder_index = 1
 
+    def enterStart(self, ctx: IslaLanguageParser.StartContext):
+        self.used_variables = used_variables_in_concrete_syntax(ctx)
+
     def exitPredicateArg(self, ctx: IslaLanguageParser.PredicateArgContext):
         text = parse_tree_text(ctx)
 
@@ -186,6 +245,12 @@ class AbstractISLaEmitter(ISLaEmitter):
             self.predicate_args[ctx] = int(text)
         elif ctx.STRING():
             self.predicate_args[ctx] = text[1:-1]
+        elif ctx.VAR_TYPE():
+            variable = self.register_var_for_free_nonterminal(parse_tree_text(ctx.VAR_TYPE()))
+            self.predicate_args[ctx] = variable
+        elif ctx.XPATHEXPR():
+            variable = self.register_var_for_xpath_expression(parse_tree_text(ctx))
+            self.predicate_args[ctx] = variable
         elif text == STRING_PLACEHOLDER:
             self.predicate_args[ctx] = StringPlaceholderVariable(
                 f"STRING_{self.next_string_placeholder_index}")
@@ -202,7 +267,7 @@ class AbstractISLaEmitter(ISLaEmitter):
             assert False, f"Unknown predicate argument type: {text}"
 
     def exitSMTFormula(self, ctx: IslaLanguageParser.SMTFormulaContext):
-        formula_text = antlr_get_text_with_whitespace(ctx)
+        formula_text = self.smt_expressions[ctx.sexpr()]
 
         match = re.search("(" + re.escape(STRING_PLACEHOLDER) + ")", formula_text)
         if match:
@@ -221,7 +286,12 @@ class AbstractISLaEmitter(ISLaEmitter):
         try:
             z3_constr = z3.parse_smt2_string(
                 f"(assert {formula_text})",
-                decls={var: z3.String(var) for var in self.known_var_names()})[0]
+                decls=({var: z3.String(var)
+                        for var in self.known_var_names()} |
+                       {nonterminal: z3.String(var.name)
+                        for nonterminal, var in self.vars_for_free_nonterminals.items()} |
+                       {xpath_expr: z3.String(var.name)
+                        for xpath_expr, var in self.vars_for_xpath_expressions.items()}))[0]
         except z3.Z3Exception as exp:
             raise SyntaxError(
                 f"Error parsing SMT formula '{formula_text}', {exp.value.decode().strip()}")

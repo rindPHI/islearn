@@ -18,7 +18,7 @@ from grammar_graph import gg
 from isla import language, isla_predicates
 from isla.evaluator import evaluate, matches_for_quantified_formula, implies
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
-    is_nonterminal, dict_of_lists_to_list_of_dicts, get_subtrie, path_to_trie_key
+    is_nonterminal, dict_of_lists_to_list_of_dicts, get_subtrie, path_to_trie_key, canonical
 from isla.isla_predicates import reachable
 from isla.language import set_smt_auto_eval, ensure_unique_bound_variables
 from isla.solver import ISLaSolver
