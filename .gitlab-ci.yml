@@ -15,6 +15,7 @@ before_script:
   - virtualenv venv
   - source venv/bin/activate
   - pip install --upgrade pip
+  - pip install --upgrade build
   - pip install -e .[test]
 
 test:
