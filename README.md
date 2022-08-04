@@ -30,9 +30,53 @@ LANG_GRAMMAR = {
 }
 ```
 
-Let `prop` be a function returning `True` if a given statement evaluates normally,
-and `False` if the evaluation raises an exception. The latter is the case if a
-variable appears as a right-hand-side, but has not been assigned a variable before.
+For learning input invariants, we need a property of the inputs satisfying that
+invariant. If the goal is to learn properties about (non-context-free) syntactical
+correctness of a programming language, this is a function returning `True` if, and
+only if, a statement is executed without raising a specific class of errors. For
+our language described by `LANG_GRAMMAR`, we define an `eval_lang` function that raises
+an error if an identifier is not defined; `validate_lang` turns this into a property.
+
+```python
+from typing import Dict
+from islearn.parse_tree_utils import dfs, get_subtree, tree_to_string
+
+from isla.language import DerivationTree
+from isla.parser import EarleyParser
+from isla.type_defs import ParseTree
+
+def eval_lang(inp: str) -> Dict[str, int]:
+    def assgnlhs(assgn: ParseTree):
+        return tree_to_string(get_subtree((0,), assgn))
+
+    def assgnrhs(assgn: ParseTree):
+        return tree_to_string(get_subtree((2,), assgn))
+
+    valueMap: Dict[str, int] = {}
+    tree = list(EarleyParser(LANG_GRAMMAR).parse(inp))[0]
+
+    def evalAssignments(tree):
+        node, children = tree
+        if node == "<assgn>":
+            lhs = assgnlhs(tree)
+            rhs = assgnrhs(tree)
+            if rhs.isdigit():
+                valueMap[lhs] = int(rhs)
+            else:
+                valueMap[lhs] = valueMap[rhs]
+
+    dfs(tree, evalAssignments)
+
+    return valueMap
+
+
+def validate_lang(inp: DerivationTree) -> bool:
+    try:
+        eval_lang(str(inp))
+        return True
+    except Exception:
+        return False
+```
 
 ISLearn can learn this property based on the "Def-Use (reST Strict)" pattern from
 the catalog (the standard catalog is in `src/islearn/patterns.toml`). You call
@@ -45,7 +89,7 @@ from typing import Dict, Tuple
 
 result: Dict[Formula, Tuple[float, float]] = InvariantLearner(
     LANG_GRAMMAR,
-    prop=prop,
+    prop=validate_lang,
     activated_patterns={
         "Def-Use (reST Strict)",  # Optional; leads to quicker results
     },

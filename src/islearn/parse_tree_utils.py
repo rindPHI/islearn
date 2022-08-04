@@ -39,6 +39,14 @@ def dict_tree_to_tree(tree: DictTree[T]) -> Tree[T]:
     return label, [dict_tree_to_tree(child) for child in [{t[0]: t[1]} for t in tree[label].items()]]
 
 
+def dfs(tree: ParseTree, action: Callable[[ParseTree], None] = print):
+    node, children = tree
+    action(tree)
+    if children is not None:
+        for child in children:
+            dfs(child, action)
+
+
 def get_subtree(tree: Tree[T], path: Path) -> Tree[T]:
     """Access a subtree based on `path` (a list of children numbers)"""
     curr_node = tree
