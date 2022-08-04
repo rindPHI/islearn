@@ -90,14 +90,15 @@ forall <start> container in start:
 
         self.assertTrue(evaluate(checksum_constraint, wrong_ping_request_message, ICMP_GRAMMAR).is_unknown())
 
-        # The approximate evaluator should return False instead of Unknown
+        # The approximate evaluator returns True, since the formula is satisfiable if
+        # the assignments are changed.
         self.assertTrue(
             approximately_evaluate_abst_for(
                 checksum_constraint,
                 ICMP_GRAMMAR,
                 gg.GrammarGraph.from_grammar(ICMP_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), wrong_ping_request_message)},
-                wrong_ping_request_message.trie()).is_false())
+                wrong_ping_request_message.trie()).is_true())
 
     def test_checksum_random_ping_packet(self):
         checksum_constraint = parse_isla("""
