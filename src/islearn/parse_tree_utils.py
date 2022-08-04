@@ -4,7 +4,7 @@ from typing import List, Callable, Tuple, Generator, Optional, Any, Sequence, Ty
 
 import datrie
 from isla.helpers import is_nonterminal, mk_subtree_trie, path_to_trie_key
-from isla.type_defs import Path, CanonicalGrammar
+from isla.type_defs import Path, CanonicalGrammar, ParseTree
 
 T = TypeVar("T")
 S = TypeVar("S")
