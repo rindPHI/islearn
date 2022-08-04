@@ -110,7 +110,7 @@ invariants or to quicker results.
 | perform_static_implication_check            | False      | Statically exclude weaker invariants by a translation to Z3. Rather slow, handle with care.                  |
 | k                                           | 3          | The `k` from `k`-Paths. Used by the input generators and filters.                                            |
 
-## Build, Run, Install
+## Install, Build, Test
 
 ISLearn depends on Python 3.10 and the Python header files (from package python3.10-dev in Ubuntu Linux). Furthermore,
 python3.10-venv is required to run ISLa in a virtual environment.
@@ -123,48 +123,58 @@ sudo apt-get upgrade
 sudo apt-get install python3.10 python3.10-dev python3.10-venv
 ```
 
-For development and testing, we recommend to use ISLearn inside a virtual environment (virtualenv).
-By thing the following steps in a standard shell (bash), one can run the ISLearn tests:
+### Install
+
+To install ISLearn, a simple `pip install islearn` suffices. We recommend installing ISLearn inside a virtual
+environment (virtualenv):
 
 ```shell
-git clone git@github.com:rindPHI/islearn.git
+python3.10 -m venv venv
+source venv/bin/activate
+pip3 install --upgrade pip
+pip3 install islearn
+```
+
+### Build 
+
+ISLearn is built locally as follows:
+
+```shell
+git clone https://github.com/rindPHI/islearn.git
 cd islearn/
 
 python3.10 -m venv venv
 source venv/bin/activate
 
 pip3 install --upgrade pip
-pip3 install -r requirements.txt
-pip3 install z3-solver=4.8.14.0
+pip3 install --upgrade build
+python3 -m build
+```
+
+Then, you will find the built wheel (`*.whl`) in the `dist/` directory.
+
+### Testing & Development
+
+For running the ISLearn tests, you additionally need `clang`, `racket`, and `graphviz`. On Alpine Linux, you
+can install those by
+
+```shell
+apk update
+apk upgrade
+apk add clang racket graphviz
+```
+
+Then, you can run the ISLearn tests as follows:
+
+```shell
+git clone https://github.com/rindPHI/islearn.git
+cd islearn/
+
+python3.10 -m venv venv
+source venv/bin/activate
+pip3 install --upgrade pip
 
 # Run tests
-tox
-```
-
-NOTE: This projects needs z3 >= 4.8.13.0, but the requirements only list
-4.8.8.0 due to a strict requirement in the fuzzingbook package. After
-installing from requirements, you have to manually install a new z3 version
-(e.g., `pip install z3-solver=4.8.14.0`) and simply ignore the upcoming
-warning.
-
-For running scripts without tox, you have to add the path to the ISLearn folder to the PYTHONPATH environment variable.
-For running the evaluation, you also have to add the `tests/` directory.
-This is done by typing (in bash)
-
-```shell
-export PYTHONPATH=$PYTHONPATH:`pwd`
-export PYTHONPATH=$PYTHONPATH:`pwd`/tests
-```
-
-inside the ISLearn top-level directory. Then you can run, for example, `python3 -O evaluations/icmp/evaluate_icmp.py`.
-For using ISLa in Visual Studio, you might have to set the value of the environment variable in the launch.json file; in
-Pycharm, we did not have to apply any special settings.
-
----
-
-To install ISLearn globally (not recommended, less well tested), run
-
-```shell
-python3 -m build
-pip3 install dist/islaern-0.1a1-py3-none-any.whl
+pip3 install -e .[test]
+python3 -m pytest -n 16 tests
 ```
