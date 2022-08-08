@@ -88,6 +88,15 @@ forall <xml-tree> xml_tree="{<?MATCHEXPR(<id-no-prefix> prefix_use)>}" in start:
         (= prefix_use prefix_def)))
 """, xml_lang.XML_GRAMMAR_WITH_NAMESPACE_PREFIXES)
 
+    def test_toml_value_type_is_string(self):
+        parse_abstract_isla('''
+forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
+  ((= key <?STRING>) implies
+   (str.in_re value (re.++ (str.to_re "")
+                           (re.* (re.comp (re.union (str.to_re "\n") (str.to_re ""))))
+                           (str.to_re ""))))
+''')
+
 
 if __name__ == '__main__':
     unittest.main()

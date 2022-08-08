@@ -12,14 +12,14 @@ formula:
   | 'exists' 'int' ID ':' formula                   # ExistsInt
   | 'forall' 'int' ID ':' formula                   # ForallInt
   | 'not' formula                                   # Negation
-  | formula 'and' formula                           # Conjunction
-  | formula 'or' formula                            # Disjunction
-  | formula 'xor' formula                           # ExclusiveOr
-  | formula 'implies' formula                       # Implication
+  | formula AND formula                           # Conjunction
+  | formula OR formula                            # Disjunction
+  | formula XOR formula                           # ExclusiveOr
+  | formula IMPLIES_ISLA formula                       # Implication
   | formula 'iff' formula                           # Equivalence
   | ID '(' predicateArg (',' predicateArg) * ')'    # PredicateAtom
-  | sexpr                                           # SMTFormula
   | '(' formula ')'                                 # ParFormula
+  | sexpr                                           # SMTFormula
   ;
 
 sexpr:
@@ -30,21 +30,68 @@ sexpr:
   | XPATHEXPR                               # SexprXPathExpr
   | VAR_TYPE                                # SexprFreeId
   | STRING                                  # SexprStr
+  | (SMT_NONBINARY_OP | smt_binary_op)         # SexprOp
+  | op=SMT_NONBINARY_OP '(' ( sexpr ( ',' sexpr ) * ) ? ')' # SexprPrefix
   | NONTERMINAL_PH                          # SexprNonterminalStringPh
   | STRING_PH                               # SexprStringPh
   | DSTRINGS_PH                             # SexprDisjStringsPh
-  | ('=' | GEQ | LEQ | GT | LT | 're.+' | 're.*' | 're.++' | 'str.++' | DIV | MUL | PLUS | MINUS)
-                                            # SexprOp
-  | op=('re.+' | 're.*') '(' sexpr ')'      # SexprPrefix
-  | sexpr op=('re.++' | 'str.++') sexpr     # SexprInfixReStr
+  | sexpr op=SMT_INFIX_RE_STR sexpr         # SexprInfixReStr
   | sexpr op=(PLUS | MINUS) sexpr           # SexprInfixPlusMinus
-  | sexpr op=(MUL | DIV) sexpr              # SexprInfixMulDiv
+  | sexpr op=(MUL | DIV | MOD) sexpr           # SexprInfixMulDiv
   | sexpr op=('=' | GEQ | LEQ | GT | LT) sexpr # SexprInfixEq
-  | '(' sexpr ')'                           # SepxrParen
   | '(' op=sexpr sexpr + ')'                # SepxrApp
   ;
 
 predicateArg: ID | VAR_TYPE | INT | STRING | XPATHEXPR | NONTERMINAL_PH | STRING_PH | DSTRINGS_PH ;
+
+AND: 'and' ;
+OR: 'or' ;
+NOT: 'not' ;
+
+XOR: 'xor' ;
+IMPLIES_SMT: '=>' ;
+IMPLIES_ISLA: 'implies' ;
+
+smt_binary_op:
+  '=' | GEQ | LEQ | GT | LT | MUL | DIV | MOD | PLUS | MINUS | SMT_INFIX_RE_STR | AND | OR | IMPLIES_SMT | XOR;
+
+SMT_INFIX_RE_STR:
+      're.++'
+    | 'str.++'
+    | 'str.<='
+    ;
+
+SMT_NONBINARY_OP:
+      ABS
+    | 're.+'
+    | 're.*'
+    | 'str.len'
+    | 'str.in_re'
+    | 'str.to_re'
+    | 're.none'
+    | 're.all'
+    | 're.allchar'
+    | 'str.at'
+    | 'str.substr'
+    | 'str.prefixof'
+    | 'str.suffixof'
+    | 'str.contains'
+    | 'str.indexof'
+    | 'str.replace'
+    | 'str.replace_all'
+    | 'str.replace_re'
+    | 'str.replace_re_all'
+    | 're.comp'
+    | 're.diff'
+    | 're.opt'
+    | 're.range'
+    | 're.loop'
+    | 'str.is_digit'
+    | 'str.to_code'
+    | 'str.from_code'
+    | 'str.to.int'
+    | 'str.from_int'
+    ;
 
 XPATHEXPR: (ID | VAR_TYPE) XPATHSEGMENT + ;
 
@@ -60,6 +107,10 @@ DSTRINGS_PH: '<?DSTRINGS>' ;
 
 VAR_TYPE : LT ID GT ;
 
+DIV: 'div' ;
+MOD: 'mod' ;
+ABS: 'abs' ;
+
 STRING: '"' (ESC|.) *? '"';
 ID: ID_LETTER (ID_LETTER | DIGIT) * ;
 INT : DIGIT+ ;
@@ -70,7 +121,6 @@ TWODOTS : '..' ;
 BROP : '[' ;
 BRCL : ']' ;
 
-DIV: '/' ;
 MUL: '*' ;
 PLUS: '+' ;
 MINUS: '-' ;

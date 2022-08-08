@@ -129,9 +129,9 @@ name = "Value Type is String (TOML)"
 constraint = '''
 forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
   ((= key <?STRING>) implies
-   (str.in_re value (re.++ (str.to_re """")
-                           (re.* (re.comp (re.union (str.to_re "\n") (str.to_re """"))))
-                           (str.to_re """"))))
+   (str.in_re value (re.++ (str.to_re "\"")
+                           (re.* (re.comp (re.union (str.to_re "\n") (str.to_re "\""))))
+                           (str.to_re "\""))))
 '''
 
 [[Types]]
@@ -172,9 +172,9 @@ forall <?NONTERMINAL> container in start:
   forall <?NONTERMINAL> row in container:
     exists <?NONTERMINAL> column in row:
       (nth(<?STRING>, column, row) and
-        (str.in_re column (re.++ (str.to_re """")
-                          (re.* (re.comp (re.union (str.to_re "\n") (str.to_re """"))))
-                          (str.to_re """"))))
+        (str.in_re column (re.++ (str.to_re "\"")
+                          (re.* (re.comp (re.union (str.to_re "\n") (str.to_re "\""))))
+                          (str.to_re "\""))))
 '''
 
 [[Types]]

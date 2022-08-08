@@ -278,15 +278,6 @@ class IslaLanguageListener(ParseTreeListener):
         pass
 
 
-    # Enter a parse tree produced by IslaLanguageParser#SepxrParen.
-    def enterSepxrParen(self, ctx:IslaLanguageParser.SepxrParenContext):
-        pass
-
-    # Exit a parse tree produced by IslaLanguageParser#SepxrParen.
-    def exitSepxrParen(self, ctx:IslaLanguageParser.SepxrParenContext):
-        pass
-
-
     # Enter a parse tree produced by IslaLanguageParser#SexprStr.
     def enterSexprStr(self, ctx:IslaLanguageParser.SexprStrContext):
         pass
@@ -329,6 +320,15 @@ class IslaLanguageListener(ParseTreeListener):
 
     # Exit a parse tree produced by IslaLanguageParser#predicateArg.
     def exitPredicateArg(self, ctx:IslaLanguageParser.PredicateArgContext):
+        pass
+
+
+    # Enter a parse tree produced by IslaLanguageParser#smt_binary_op.
+    def enterSmt_binary_op(self, ctx:IslaLanguageParser.Smt_binary_opContext):
+        pass
+
+    # Exit a parse tree produced by IslaLanguageParser#smt_binary_op.
+    def exitSmt_binary_op(self, ctx:IslaLanguageParser.Smt_binary_opContext):
         pass
 
 

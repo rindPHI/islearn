@@ -300,6 +300,12 @@ class AbstractISLaEmitter(ISLaEmitter):
 
     def exitSMTFormula(self, ctx: IslaLanguageParser.SMTFormulaContext):
         formula_text = self.smt_expressions[ctx.sexpr()]
+        formula_text = formula_text.replace(r'\"', '""')
+
+        # We have to replace XPath expressions in the formula, since they can break
+        # the parsing (e.g., with `<a>[2]` indexed expressions).
+        for xpath_expr in self.vars_for_xpath_expressions:
+            formula_text = formula_text.replace(xpath_expr, f'var_{abs(hash(xpath_expr))}')
 
         match = re.search("(" + re.escape(STRING_PLACEHOLDER) + ")", formula_text)
         if match:
@@ -322,7 +328,7 @@ class AbstractISLaEmitter(ISLaEmitter):
                         for var in self.known_var_names()} |
                        {nonterminal: z3.String(var.name)
                         for nonterminal, var in self.vars_for_free_nonterminals.items()} |
-                       {xpath_expr: z3.String(var.name)
+                       {f'var_{abs(hash(xpath_expr))}': z3.String(var.name)
                         for xpath_expr, var in self.vars_for_xpath_expressions.items()}))[0]
         except z3.Z3Exception as exp:
             raise SyntaxError(
@@ -330,6 +336,15 @@ class AbstractISLaEmitter(ISLaEmitter):
 
         free_vars = [self.get_var(str(s)) for s in get_symbols(z3_constr)]
         self.formulas[ctx] = language.SMTFormula(z3_constr, *free_vars)
+
+    def exitSexprNonterminalStringPh(self, ctx: IslaLanguageParser.SexprNonterminalStringPhContext):
+        self.smt_expressions[ctx] = parse_tree_text(ctx)
+
+    def exitSexprStringPh(self, ctx: IslaLanguageParser.SexprStringPhContext):
+        self.smt_expressions[ctx] = parse_tree_text(ctx)
+
+    def exitSexprDisjStringsPh(self, ctx: IslaLanguageParser.SexprDisjStringsPhContext):
+        self.smt_expressions[ctx] = parse_tree_text(ctx)
 
     def parse_mexpr(self, inp: str, mgr: VariableManager) -> language.BindExpression:
         class BailPrintErrorStrategy(antlr4.BailErrorStrategy):
