@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import urllib.request
+from pathlib import Path
 
 import dill as pickle
 import isla.fuzzer
@@ -29,6 +30,8 @@ dirname = os.path.abspath(os.path.dirname(__file__))
 parser = PEGParser(DOT_GRAMMAR)
 reducer = InputReducer(DOT_GRAMMAR, prop, k=3)
 graph = gg.GrammarGraph.from_grammar(DOT_GRAMMAR)
+
+Path(f"{dirname}/inputs/").mkdir(parents=False, exist_ok=True)
 
 ###
 # dot_code = """

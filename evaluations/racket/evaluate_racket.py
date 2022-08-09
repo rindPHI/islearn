@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import urllib.request
+from pathlib import Path
 
 import dill as pickle
 import isla.fuzzer
@@ -26,6 +27,8 @@ def prop(tree: language.DerivationTree) -> bool:
 dirname = os.path.abspath(os.path.dirname(__file__))
 parser = PEGParser(RACKET_BSL_GRAMMAR)
 graph = gg.GrammarGraph.from_grammar(RACKET_BSL_GRAMMAR)
+
+Path(f"{dirname}/inputs/").mkdir(parents=False, exist_ok=True)
 
 # The racket syntax check is really expensive; therefore, reduction cannot be used efficiently.
 # Also, the HTDP examples are pretty small already.
