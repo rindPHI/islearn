@@ -2,12 +2,12 @@ import re
 import unittest
 import urllib.request
 
-from fuzzingbook.Parser import PEGParser, EarleyParser
 from isla.language import DerivationTree
+from isla.parser import PEGParser, EarleyParser
 from isla_formalizations import scriptsizec
 
 from islearn.reducer import InputReducer
-from languages import DOT_GRAMMAR, render_dot
+from islearn_example_languages import DOT_GRAMMAR, render_dot
 
 
 class TestReducer(unittest.TestCase):

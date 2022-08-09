@@ -9,14 +9,13 @@ import urllib.request
 from typing import cast, Tuple, Set
 
 import pytest
-from fuzzingbook.Grammars import srange
-from fuzzingbook.Parser import EarleyParser, PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate, implies, equivalent
-from isla.helpers import strip_ws
+from isla.helpers import strip_ws, srange
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE, IN_TREE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
+from isla.parser import EarleyParser, PEGParser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
@@ -26,7 +25,7 @@ from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
     AbstractISLaUnparser
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
-from languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot, \
+from islearn_example_languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot, \
     RACKET_BSL_GRAMMAR, load_racket
 
 

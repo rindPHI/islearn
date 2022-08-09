@@ -7,11 +7,11 @@ import urllib.request
 from urllib.error import URLError
 
 import scapy.all as scapy
-from fuzzingbook.Parser import PEGParser
 from isla import language
+from isla.parser import PEGParser
 from pythonping import icmp
 
-from languages import ICMP_GRAMMAR, IPv4_GRAMMAR, RACKET_BSL_GRAMMAR
+from islearn_example_languages import ICMP_GRAMMAR, IPv4_GRAMMAR, RACKET_BSL_GRAMMAR
 from islearn.islearn_predicates import bytes_to_hex, hex_to_bytes
 
 

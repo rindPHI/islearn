@@ -1,19 +1,17 @@
-import copy
 import json
 import logging
 import math
 import string
 import unittest
 
-from fuzzingbook.Grammars import JSON_GRAMMAR, srange
-from fuzzingbook.Parser import EarleyParser
 from isla.evaluator import evaluate
-from isla.fuzzer import GrammarCoverageFuzzer
+from isla.helpers import srange
 from isla.language import DerivationTree
+from isla.parser import EarleyParser
 from isla_formalizations import scriptsizec
-from isla_formalizations.scriptsizec import compile_scriptsizec_clang
 
 from islearn.mutation import MutationFuzzer
+from islearn_example_languages import JSON_GRAMMAR
 
 
 class TestMutator(unittest.TestCase):
@@ -24,15 +22,11 @@ class TestMutator(unittest.TestCase):
             json_obj = json.loads(str(tree))
             return isinstance(json_obj, dict) and "key" in json_obj
 
-        grammar = copy.deepcopy(JSON_GRAMMAR)
-        grammar["<value>"] = ["<object>", "<array>", "<string>", "<number>", "true", "false", "null"]
-        grammar["<int>"] = ["<digit>", "<onenine><digits>", "-<digit>", "-<onenine><digits>"]
-
         inputs = [' { "key" : 13 } ']
-        trees = [DerivationTree.from_parse_tree(next(EarleyParser(grammar).parse(inp)))
+        trees = [DerivationTree.from_parse_tree(next(EarleyParser(JSON_GRAMMAR).parse(inp)))
                  for inp in inputs]
 
-        mutation_fuzzer = MutationFuzzer(grammar, trees, prop, k=4)
+        mutation_fuzzer = MutationFuzzer(JSON_GRAMMAR, trees, prop, k=4)
         # mutation_fuzzer = MutationFuzzer(grammar, trees, lambda t: not prop(t), k=4, max_mutations=2)
         for inp in mutation_fuzzer.run(extend_fragments=False):
             self.assertTrue(prop(inp))

@@ -2,14 +2,14 @@ import random
 import string
 import unittest
 
-from fuzzingbook.Parser import PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import parse_isla
+from isla.parser import PEGParser
 from pythonping import icmp
 
-from languages import ICMP_GRAMMAR
+from islearn_example_languages import ICMP_GRAMMAR
 from islearn.islearn_predicates import compute_internet_checksum, internet_checksum, INTERNET_CHECKSUM_PREDICATE, \
     bytes_to_hex, \
     hex_to_bytes, hex_to_dec, hex_to_int
