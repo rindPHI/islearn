@@ -7,11 +7,11 @@ import tempfile
 from subprocess import PIPE
 
 import graphviz
-from fuzzingbook.Grammars import srange, CHARACTERS_WITHOUT_QUOTE, crange
 # NOTE: To make this a PEG grammar, we need to escape single quotes within
 #       multiline literal strings. So, a multiline string with """ is the
 #       same as a multiline string with ''', just with different quotation marks.
 from isla import language
+from isla.helpers import srange, crange
 from isla.type_defs import Grammar
 
 toml_grammar = {
@@ -161,6 +161,12 @@ toml_grammar = {
     "<UNQUOTED_KEY_CHARS>": ["<UNQUOTED_KEY_CHAR><UNQUOTED_KEY_CHARS>", "<UNQUOTED_KEY_CHAR>"],
     "<UNQUOTED_KEY_CHAR>": ["<ALPHA>", "<DIGIT>", "-", "_"]
 }
+
+CHARACTERS_WITHOUT_QUOTE = (
+        string.digits
+        + string.ascii_letters
+        + string.punctuation.replace('"', '').replace('\\', '')
+        + ' ')
 
 JSON_GRAMMAR: Grammar = {
     "<start>": ["<json>"],
