@@ -1,6 +1,5 @@
 antlr4-python3-runtime>=4.10
 datrie>=0.8.2
-docutils>=0.18.1
 fuzzingbook>=1.1
 grammar_graph>=0.1.0
 isla-solver>=0.8.5
@@ -13,8 +12,6 @@ pytest-pycharm>=0.7.0
 pytest-rerunfailures>=10.2
 pytest-xdist>=2.4.0
 pytest>=7.1.2
-pythonping>=1.1.2
-scapy>=2.4.5
 setuptools-antlr>=0.4.0
 toml>=0.10.2
 z3-solver>=4.10.2.0
