@@ -6,11 +6,11 @@ import urllib.request
 
 import dill as pickle
 import isla.fuzzer
-from fuzzingbook.Parser import PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import ISLaUnparser, DerivationTree
+from isla.parser import PEGParser
 
 from islearn.helpers import tree_in
 from islearn.learner import InvariantLearner

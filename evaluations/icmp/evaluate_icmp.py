@@ -3,11 +3,11 @@ import random
 import string
 import struct
 
-from fuzzingbook.Parser import PEGParser
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import ISLaUnparser
+from isla.parser import PEGParser
 from pythonping import icmp
 
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
