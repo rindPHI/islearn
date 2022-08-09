@@ -15,7 +15,7 @@ from isla.language import DerivationTree, ISLaUnparser
 from islearn.helpers import tree_in
 from islearn.learner import InvariantLearner
 from islearn.mutation import MutationFuzzer
-from languages import RACKET_BSL_GRAMMAR, load_racket
+from islearn_example_languages import load_racket, RACKET_BSL_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)
 

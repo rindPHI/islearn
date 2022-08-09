@@ -12,7 +12,7 @@ from pythonping import icmp
 
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.learner import InvariantLearner
-from languages import ICMP_GRAMMAR
+from islearn_example_languages import ICMP_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)
 

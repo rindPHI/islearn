@@ -16,7 +16,7 @@ from islearn.helpers import tree_in
 from islearn.learner import InvariantLearner
 from islearn.mutation import MutationFuzzer
 from islearn.reducer import InputReducer
-from languages import DOT_GRAMMAR, render_dot
+from islearn_example_languages import render_dot, DOT_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)
 
