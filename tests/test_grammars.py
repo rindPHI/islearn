@@ -82,7 +82,7 @@ class TestGrammars(unittest.TestCase):
         # Load Racket BSL examples from a How to Design Programs exercise solutions repository.
         urls = [
             f'https://raw.githubusercontent.com/kelamg/HtDP2e-workthrough/master/HtDP/Fixed-size-Data/ex{str(i)}.rkt'
-            for i in range(35) if i != 9 and i != 10  # Goes to 128
+            for i in range(1, 37) if i not in {3, 4, 9, 10, 32, 33}  # Goes to 128
         ]
 
         for url in urls:
