@@ -70,8 +70,12 @@ for url in urls:
         print(f"URL {url} is invalid, code:\n{racket_code}")
         sys.exit(1)
 
-    with open(tree_file, 'wb') as file:
-        file.write(pickle.dumps(sample_tree))
+    try:
+        with open(tree_file, 'wb') as sample_file:
+            sample_file.write(pickle.dumps(sample_tree))
+    except Exception as err:
+        print(f'Could not save sample input to file {tree_file}: {err}')
+        print('This is *not critical*. Inputs are only saved to speed up later runs.')
 
     positive_trees.append(sample_tree)
 

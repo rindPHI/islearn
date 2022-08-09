@@ -87,11 +87,20 @@ for url in urls:
 
     reduced_tree = reducer.reduce_by_smallest_subtree_replacement(sample_tree)
 
-    with open(tree_file, 'wb') as file:
-        file.write(pickle.dumps(sample_tree))
+    try:
+        with open(tree_file, 'wb') as sample_file:
+            sample_file.write(pickle.dumps(sample_tree))
 
-    with open(reduced_tree_file, 'wb') as file:
-        file.write(pickle.dumps(reduced_tree))
+        try:
+            with open(reduced_tree_file, 'wb') as reduced_file:
+                reduced_file.write(pickle.dumps(reduced_tree))
+        except Exception as err:
+            print(f'Could not save reduced input to file {reduced_tree_file}: {err}')
+            print('This is *not critical*. Inputs are only saved to speed up later runs.')
+    except Exception as err:
+        print(f'Could not save sample input to file {tree_file}: {err}')
+        print('This is *not critical*. Inputs are only saved to speed up later runs.')
+
 
     positive_trees.append(sample_tree)
     reduced_trees.append(reduced_tree)
