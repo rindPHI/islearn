@@ -5,6 +5,7 @@ grammar_graph>=0.1.0
 isla-solver>=0.8.13
 pathos>=0.2.9
 pythonping>=1.1.2
+requests>=2.28.1
 scapy>=2.4.5
 setuptools-antlr>=0.4.0
 toml>=0.10.2
