@@ -7,6 +7,7 @@ from pathlib import Path
 
 import dill as pickle
 import isla.fuzzer
+import requests
 from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
@@ -19,6 +20,7 @@ from islearn.mutation import MutationFuzzer
 from islearn_example_languages import load_racket, RACKET_BSL_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)
+
 
 def prop(tree: language.DerivationTree) -> bool:
     return load_racket(tree) is True
@@ -33,9 +35,8 @@ Path(f"{dirname}/inputs/").mkdir(parents=False, exist_ok=True)
 # The racket syntax check is really expensive; therefore, reduction cannot be used efficiently.
 # Also, the HTDP examples are pretty small already.
 urls = [
-    f"https://github.com/johnamata/compsci/raw/"
-    f"cfb0e48c151da1d3463f3f0faca9f666af22ee16/htdp/exercises/{str(i).rjust(3, '0')}.rkt"
-    for i in range(1, 30)
+    f'https://raw.githubusercontent.com/kelamg/HtDP2e-workthrough/master/HtDP/Fixed-size-Data/ex{str(i)}.rkt'
+    for i in range(1, 35) if i not in {3, 4, 9, 10, 32, 33}  # Goes to 128
 ]
 
 positive_trees = []
@@ -49,6 +50,10 @@ for url in urls:
             positive_trees.append(pickle.loads(file.read()))
 
         continue
+
+    if requests.get(url).status_code != 200:
+        print(f'URL {url} is not reachable!', file=sys.stderr)
+        sys.exit(1)
 
     with urllib.request.urlopen(url) as f:
         racket_code = f.read().decode('utf-8')
@@ -67,15 +72,17 @@ for url in urls:
     try:
         sample_tree = language.DerivationTree.from_parse_tree(list(parser.parse(racket_code))[0])
     except SyntaxError:
-        print(f"URL {url} is invalid, code:\n{racket_code}")
+        print(f"URL {url} is invalid, code:\n{racket_code}", file=sys.stderr)
         sys.exit(1)
 
     try:
         with open(tree_file, 'wb') as sample_file:
             sample_file.write(pickle.dumps(sample_tree))
     except Exception as err:
-        print(f'Could not save sample input to file {tree_file}: {err}')
-        print('This is *not critical*. Inputs are only saved to speed up later runs.')
+        if os.path.exists(tree_file):
+            os.remove(tree_file)
+        print(f'Could not save sample input to file {tree_file}: {err}', file=sys.stderr)
+        print('This is *not critical*. Inputs are only saved to speed up later runs.', file=sys.stderr)
 
     positive_trees.append(sample_tree)
 
@@ -83,8 +90,8 @@ for url in urls:
 # This is to exclude certain negative inputs that are actually manifestations
 # of grammar imprecision rather than semantic errors. The learner's fuzzer
 # cannot tell those apart.
-target_number_positive_inputs = 50
-target_number_negative_inputs = 70
+target_number_positive_inputs = 20  # 50
+target_number_negative_inputs = 30  # 70
 
 new_positive_trees = []
 negative_trees = []
@@ -181,6 +188,7 @@ result = InvariantLearner(
     negative_examples=negative_learning_inputs,
     target_number_positive_samples=15,
     target_number_negative_samples=20,
+    target_number_positive_samples_for_learning=5,
     max_conjunction_size=2,
     max_disjunction_size=1,
     filter_inputs_for_learning_by_kpaths=False,
