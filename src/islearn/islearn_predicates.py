@@ -4,10 +4,10 @@ from typing import List, Sequence, Optional, Tuple
 
 from isla import language
 from isla.helpers import srange
-from isla.parser import PEGParser
 from isla.type_defs import Grammar
 
 from islearn.helpers import remove_spaces
+from islearn.parser import PEGParser
 
 
 def internet_checksum(

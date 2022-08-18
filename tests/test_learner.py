@@ -15,7 +15,7 @@ from isla.evaluator import evaluate, implies, equivalent
 from isla.helpers import strip_ws, srange
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE, IN_TREE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
-from isla.parser import EarleyParser, PEGParser
+from isla.parser import EarleyParser
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
@@ -25,6 +25,7 @@ from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable
     AbstractISLaUnparser
 from islearn.learner import patterns_from_file, InvariantLearner, \
     create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
+from islearn.parser import PEGParser
 from islearn_example_languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot, \
     RACKET_BSL_GRAMMAR, load_racket
 

@@ -1,5 +1,4 @@
 import random
-import re
 import string
 import sys
 import unittest
@@ -8,11 +7,11 @@ from urllib.error import URLError
 
 import scapy.all as scapy
 from isla import language
-from isla.parser import PEGParser
 from pythonping import icmp
 
-from islearn_example_languages import ICMP_GRAMMAR, IPv4_GRAMMAR, RACKET_BSL_GRAMMAR
 from islearn.islearn_predicates import bytes_to_hex, hex_to_bytes
+from islearn.parser import PEGParser
+from islearn_example_languages import ICMP_GRAMMAR, IPv4_GRAMMAR, RACKET_BSL_GRAMMAR
 
 
 class TestGrammars(unittest.TestCase):

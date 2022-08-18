@@ -11,11 +11,11 @@ from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import ISLaUnparser, DerivationTree
-from isla.parser import PEGParser
 
 from islearn.helpers import tree_in
 from islearn.learner import InvariantLearner
 from islearn.mutation import MutationFuzzer
+from islearn.parser import PEGParser
 from islearn.reducer import InputReducer
 from islearn_example_languages import render_dot, DOT_GRAMMAR
 
