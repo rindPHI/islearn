@@ -334,11 +334,11 @@ exists int num:
 
     @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_string_existence(self):
-        correct_property = """
+        correct_property = r'''
 forall <json> container in start:
   exists <string> elem in container:
-    (= elem \"""key""\")
-"""
+    (= elem "\"key\"")
+'''
 
         def prop(tree: language.DerivationTree) -> bool:
             json_obj = json.loads(str(tree))
