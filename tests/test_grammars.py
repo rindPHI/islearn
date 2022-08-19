@@ -7,10 +7,13 @@ from urllib.error import URLError
 
 import scapy.all as scapy
 from isla import language
+from isla.helpers import grammar_to_immutable
+from isla.language import grammar_to_match_expr_grammar
+from isla.parser import PEGParser
 from pythonping import icmp
 
 from islearn.islearn_predicates import bytes_to_hex, hex_to_bytes
-from islearn.parser import PEGParser
+from islearn.parse_tree_utils import tree_to_string
 from islearn_example_languages import ICMP_GRAMMAR, IPv4_GRAMMAR, RACKET_BSL_GRAMMAR
 
 
@@ -124,6 +127,11 @@ class TestGrammars(unittest.TestCase):
         tree = language.DerivationTree.from_parse_tree(list(parser.parse(racket_code))[0])
         self.assertTrue(tree.filter(lambda t: t.value == "<definition>"))
 
+    def test_racket_bind_expr_grammar_parse(self):
+        flattened_bind_expr = '<maybe_comments><MWSS>(<MWSS>{<name> prefix_use}<wss_exprs><MWSS>)'
+        grammar = grammar_to_match_expr_grammar('<expr>', grammar_to_immutable(RACKET_BSL_GRAMMAR))
+        parser = PEGParser(grammar, log=True)
+        self.assertEqual(flattened_bind_expr, tree_to_string(parser.parse(flattened_bind_expr)[0]))
 
 if __name__ == '__main__':
     unittest.main()

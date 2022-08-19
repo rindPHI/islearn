@@ -21,7 +21,7 @@ before_script:
 test:
   script:
     #- pip install --no-cache-dir --prefix=$(python3 -m site --user-base) --no-deps -e .[test]
-    - pytest -n 4 --html=report.html --self-contained-html --cov=isla tests/ --cov-config=.coveragerc
+    - pytest -n 8 --html=report.html --self-contained-html --cov=isla tests/ --cov-config=.coveragerc
     #- python3 -m pytest -n 16 --html=report.html --self-contained-html
 
 build:

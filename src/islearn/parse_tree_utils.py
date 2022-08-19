@@ -3,7 +3,8 @@ import math
 from typing import List, Callable, Tuple, Generator, Optional, Any, Sequence, TypeVar, Dict, cast
 
 import datrie
-from isla.helpers import is_nonterminal, mk_subtree_trie, path_to_trie_key
+from isla.helpers import is_nonterminal
+from isla.trie import path_to_trie_key
 from isla.type_defs import Path, CanonicalGrammar, ParseTree
 
 T = TypeVar("T")
@@ -148,7 +149,6 @@ def tree_paths(tree: Tree[T]) -> List[Tuple[Path, Tree[T]]]:
 
 
 def trie_from_parse_tree(tree: Tree) -> datrie.Trie:
-    pass
     trie = mk_subtree_trie()  # Works for up to 30 children of a node
     for path, subtree in tree_paths(tree):
         trie[path_to_trie_key(path)] = (path, subtree)
@@ -170,6 +170,28 @@ def next_trie_key(trie: datrie.Trie, path: Path | str) -> Optional[str]:
                 return maybe_next_key
 
         return None
+
+
+def mk_subtree_trie() -> datrie.Trie:
+    return datrie.Trie([chr(i) for i in range(30)])
+
+
+def get_subtrie(trie: datrie.Trie, new_root_path: Path | str) -> datrie.Trie:
+    subtrees_trie = mk_subtree_trie()
+
+    if isinstance(new_root_path, str):
+        root_key = new_root_path
+        root_path_len = len(root_key) - 1
+    else:
+        assert isinstance(new_root_path, tuple)
+        root_key = path_to_trie_key(new_root_path)
+        root_path_len = len(new_root_path)
+
+    for suffix in trie.suffixes(root_key):
+        path, tree = trie[root_key + suffix]
+        subtrees_trie[chr(1) + suffix] = (path[root_path_len:], tree)
+
+    return subtrees_trie
 
 
 def tree_to_string(tree: Tree, show_open_leaves: bool = False) -> str:

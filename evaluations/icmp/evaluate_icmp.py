@@ -7,11 +7,11 @@ from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import ISLaUnparser
+from isla.parser import PEGParser
 from pythonping import icmp
 
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.learner import InvariantLearner
-from islearn.parser import PEGParser
 from islearn_example_languages import ICMP_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)

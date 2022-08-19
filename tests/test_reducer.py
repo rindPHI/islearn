@@ -4,9 +4,9 @@ import urllib.request
 
 from isla.language import DerivationTree
 from isla.parser import EarleyParser
+from isla.parser import PEGParser
 from isla_formalizations import scriptsizec
 
-from islearn.parser import PEGParser
 from islearn.reducer import InputReducer
 from islearn_example_languages import DOT_GRAMMAR, render_dot
 

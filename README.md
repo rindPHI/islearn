@@ -151,7 +151,6 @@ invariants or to quicker results.
 | mexpr_expansion_limit                       | 1          | To what depth should the learner search for instantiations of match expressions?                             |
 | max_nonterminals_in_mexpr                   | None       | How many nonterminals are allowed in match expressions? `None` means no restriction.                         |
 | exclude_nonterminals                        | None       | "Irrelevant" grammar nonterminals. Reduces search space. Example: White space nonterminals.                  |
-| perform_static_implication_check            | False      | Statically exclude weaker invariants by a translation to Z3. Rather slow, handle with care.                  |
 | k                                           | 3          | The `k` from `k`-Paths. Used by the input generators and filters.                                            |
 
 ## Install, Build, Test

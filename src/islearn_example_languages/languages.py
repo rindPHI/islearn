@@ -18,7 +18,7 @@ toml_grammar = {
     "<start>": ["<document>"],
     "<document>": ["<expressions>"],
     "<expressions>": ["<expression><NL><expressions>", "<expression>"],
-    "<expression>": ["<key_value><comment>", "<table><comment>", "<comment>"],
+    "<expression>": ["<table><comment>", "<key_value><comment>", "<comment>"],
     "<comment>": ["# <STR_NO_NL>", ""],
     "<STR_NO_NL>": ["<STR_NO_NL_CHARS><STR_NO_NL>", ""],
     "<STR_NO_NL_CHARS>": list(set(srange(string.printable)) - {"\n"}),
@@ -32,20 +32,33 @@ toml_grammar = {
     "<value>": ["<string>", "<date_time>", "<LOCAL_DATE>", "<floating_point>", "<integer>", "<bool>", "<array>",
                 "<inline_table>"],
     "<string>": ["<ML_BASIC_STRING>", "<BASIC_STRING>", "<ML_LITERAL_STRING>", "<LITERAL_STRING>"],
-    "<integer>": ["<DEC_INT>", "<HEX_INT>", "<OCT_INT>", "<BIN_INT>"],
+    "<integer>": ["<HEX_INT>", "<OCT_INT>", "<BIN_INT>", "<DEC_INT>"],
     "<floating_point>": ["<FLOAT>", "<INF>", "<NAN>"],
     "<bool>": ["<BOOLEAN>"],
     "<date_time>": ["<OFFSET_DATE_TIME>", "<LOCAL_DATE_TIME>", "<LOCAL_DATE>", "<LOCAL_TIME>"],
     "<array>": ["[<opt_array_values><comment_nl_or_nl>]"],
     "<opt_array_values>": ["<array_values>", ""],
     "<array_values>": [
-        "<comment_nl_or_nl><value><nl_or_comment><opt_comma>",
-        "<comment_nl_or_nl><value><nl_or_comment>,<array_values><comment_nl_or_nl>"
+        "<comment_nl_or_nl><value><nl_or_comment>,<array_values><comment_nl_or_nl>",
+        "<comment_nl_or_nl><value><nl_or_comment><opt_comma>"
     ],
     "<opt_comma>": [",", ""],
-    "<comment_nl_or_nl>": ["<COMMENT><NL><comment_nl_or_nl>", "<NL><comment_nl_or_nl>", "<COMMENT><NL>", "<NL>", ""],
-    "<nl_or_comment>": ["<NL><COMMENT><nl_or_comment>", "<NL><nl_or_comment>", "<NL><COMMENT>", "<NL>", ""],
-    "<table>": ["<standard_table>", "<array_table>"],
+    "<comment_nl_or_nl>": [
+        "<COMMENT><NL><comment_nl_or_nl>",
+        "<COMMENT><NL>",
+        "<NL><comment_nl_or_nl>",
+        "<NL>",
+        ""],
+    "<nl_or_comment>": [
+        "<NL><COMMENT><nl_or_comment>",
+        "<NL><nl_or_comment>",
+        "<NL><COMMENT>",
+        "<NL>",
+        ""],
+    "<table>": [
+        "<array_table>",
+        "<standard_table>",
+    ],
     "<standard_table>": ["[<key>]"],
     "<inline_table>": ["{<inline_table_keyvals>}"],
     "<inline_table_keyvals>": ["<inline_table_keyvals_non_empty>", ""],
@@ -122,7 +135,7 @@ toml_grammar = {
         "<HEX_DIGIT_OR_UNDERSCORE>",
         ""
     ],
-    "<HEX_DIGIT_OR_UNDERSCORE>": ["<HEX_DIGIT>", "_<HEX_DIGIT>"],
+    "<HEX_DIGIT_OR_UNDERSCORE>": ["_<HEX_DIGIT>", "<HEX_DIGIT>"],
     "<OCT_INT>": ["0o<DIGIT_0_7><DIGIT_0_7_OR_UNDERSCORES>"],
     "<DIGIT_0_7_OR_UNDERSCORES>": [
         "<DIGIT_0_7_OR_UNDERSCORE><DIGIT_0_7_OR_UNDERSCORES>",
@@ -136,7 +149,10 @@ toml_grammar = {
         "<DIGIT_0_1_OR_UNDERSCORE>",
         ""
     ],
-    "<DIGIT_0_1_OR_UNDERSCORE>": ["<DIGIT_0_1>", "_<DIGIT_0_1>"],
+    "<DIGIT_0_1_OR_UNDERSCORE>": [
+        "_<DIGIT_0_1>",
+        "<DIGIT_0_1>",
+    ],
     # dates
     "<YEAR>": ["<DIGIT><DIGIT><DIGIT><DIGIT>"],
     "<MONTH>": ["<DIGIT><DIGIT>"],
@@ -149,7 +165,10 @@ toml_grammar = {
     "<DIGITS>": ["<DIGIT>", "<DIGIT><DIGITS>"],
     "<NUMOFFSET>": ["<plusminus><HOUR>:<MINUTE>"],
     "<OFFSET>": ["Z", "<NUMOFFSET>"],
-    "<PARTIAL_TIME>": ["<HOUR>:<MINUTE>:<SECOND>", "<HOUR>:<MINUTE>:<SECOND><SECFRAC>"],
+    "<PARTIAL_TIME>": [
+        "<HOUR>:<MINUTE>:<SECOND><SECFRAC>",
+        "<HOUR>:<MINUTE>:<SECOND>",
+    ],
     "<FULL_DATE>": ["<YEAR>-<MONTH>-<DAY>"],
     "<FULL_TIME>": ["<PARTIAL_TIME><OFFSET>"],
     "<OFFSET_DATE_TIME>": ["<FULL_DATE><DELIM><FULL_TIME>"],

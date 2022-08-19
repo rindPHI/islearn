@@ -4,6 +4,7 @@ import math
 import random
 import re
 import string
+import sys
 import unittest
 import urllib.request
 from typing import cast, Tuple, Set
@@ -11,21 +12,22 @@ from typing import cast, Tuple, Set
 import pytest
 from grammar_graph import gg
 from isla import language
-from isla.evaluator import evaluate, implies, equivalent
+from isla.evaluator import evaluate
 from isla.helpers import strip_ws, srange
 from isla.isla_predicates import STANDARD_SEMANTIC_PREDICATES, BEFORE_PREDICATE, IN_TREE_PREDICATE
 from isla.language import parse_isla, ISLaUnparser
 from isla.parser import EarleyParser
+from isla.parser import PEGParser
+from isla.solver import implies, equivalent
 from isla_formalizations import scriptsizec, csv, xml_lang, rest
 from isla_formalizations.csv import CSV_HEADERBODY_GRAMMAR
 from pythonping import icmp
 
 from islearn.islearn_predicates import hex_to_bytes, bytes_to_hex
 from islearn.language import parse_abstract_isla, NonterminalPlaceholderVariable, ISLEARN_STANDARD_SEMANTIC_PREDICATES, \
-    AbstractISLaUnparser
+    AbstractISLaUnparser, unparse_abstract_isla
 from islearn.learner import patterns_from_file, InvariantLearner, \
-    create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for
-from islearn.parser import PEGParser
+    create_input_reachability_relation, InVisitor, approximately_evaluate_abst_for, PatternRepository
 from islearn_example_languages import toml_grammar, JSON_GRAMMAR, ICMP_GRAMMAR, IPv4_GRAMMAR, DOT_GRAMMAR, render_dot, \
     RACKET_BSL_GRAMMAR, load_racket
 
@@ -131,7 +133,7 @@ forall <expr> use_ctx in start:
             correct_property.strip(),
             map(lambda f: ISLaUnparser(f).unparse(), result.keys()))
 
-    # @pytest.mark.flaky(reruns=3, reruns_delay=2)
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_mexpr_rest(self):
         correct_property = """
 forall <internal_reference> use_ctx="<presep>{<id> use}_<postsep>" in start:
@@ -482,7 +484,6 @@ forall <arith_expr> container_0 in start:
             # activated_patterns={"String Existence"},
             positive_examples=trees,
             min_recall=1.0,
-            # perform_static_implication_check=True
         ).learn_invariants()
 
         print(len(result))
@@ -578,8 +579,15 @@ forall <key> elem in start:
         self.assertIn(correct_property_3.strip(), nonzero_precision_results)
 
     def test_str_len_ph_instantiation(self):
+        sys.setrecursionlimit(1500)
         repo = patterns_from_file()
-        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(repo)))[0])
+        group = 'Universal'
+        repo = PatternRepository({
+            group: [
+                {'name': name, 'constraint': unparse_abstract_isla(constraint)}
+                for name, constraint
+                in repo.groups[group].items()]})
+        tree = language.DerivationTree.from_parse_tree(PEGParser(toml_grammar).parse(str(repo))[0])
 
         pattern = parse_abstract_isla("""
 forall <key> elem in start:
@@ -587,13 +595,13 @@ forall <key> elem in start:
 
         expected = language.parse_isla("""
 forall <key> elem in start:
-  (<= (str.len elem) (str.to.int "11"))""", toml_grammar)
+  (<= (str.len elem) (str.to.int "10"))""", toml_grammar)
 
         result = InvariantLearner(
             toml_grammar,
             prop=None,
         )._instantiate_string_placeholders(
-            {pattern}, [tree.trie()]
+            {pattern}, [tree.trie().trie]
         )
 
         # print(len(result))
@@ -603,8 +611,15 @@ forall <key> elem in start:
         self.assertIn(expected, result)
 
     def test_str_len_ph_instantiations(self):
+        sys.setrecursionlimit(1500)
         repo = patterns_from_file()
-        tree = language.DerivationTree.from_parse_tree(list(PEGParser(toml_grammar).parse(str(repo)))[0])
+        group = 'Universal'
+        repo = PatternRepository({
+            group: [
+                {'name': name, 'constraint': unparse_abstract_isla(constraint)}
+                for name, constraint
+                in repo.groups[group].items()]})
+        tree = language.DerivationTree.from_parse_tree(PEGParser(toml_grammar).parse(str(repo))[0])
 
         pattern = parse_abstract_isla("""
 forall <key> elem in start:
@@ -614,7 +629,7 @@ forall <key> elem in start:
             toml_grammar,
             prop=None,
         )._get_string_placeholder_instantiations(
-            {pattern}, [tree.trie()]
+            {pattern}, [tree.trie().trie]
         )
 
         self.assertEqual(1, len(result))
@@ -623,11 +638,8 @@ forall <key> elem in start:
 
         self.assertIn("name", insts)
         self.assertIn("constraint", insts)
-        self.assertIn("11", insts)
-        self.assertIn("Types", insts)
-        self.assertIn("Def-Use", insts)
-        self.assertIn("Existential", insts)
-        self.assertIn("Misc", insts)
+        self.assertIn("10", insts)
+        self.assertIn("Universal", insts)
 
     def test_instantiate_nonterminal_placeholders_toml(self):
         graph = gg.GrammarGraph.from_grammar(toml_grammar)
@@ -848,7 +860,7 @@ forall <expr> use_ctx in start:
                 scriptsizec.SCRIPTSIZE_C_GRAMMAR,
                 gg.GrammarGraph.from_grammar(scriptsizec.SCRIPTSIZE_C_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), inp)},
-                inp.trie()).is_true())
+                inp.trie().trie).is_true())
 
     def test_evaluation_xml_balance(self):
         property = parse_isla("""
@@ -864,7 +876,7 @@ forall <xml-tree> container="<{<id> opid}><inner-xml-tree></{<id> clid}>" in sta
                 xml_lang.XML_GRAMMAR,
                 gg.GrammarGraph.from_grammar(xml_lang.XML_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), inp)},
-                inp.trie()).is_true())
+                inp.trie().trie).is_true())
 
     def test_icmp_ping_request(self):
         expected_checksum_constraint = parse_abstract_isla("""
@@ -924,9 +936,9 @@ forall <icmp_message> container in start:
 
         self.assertIn(expected_checksum_constraint, result.keys())
         self.assertIn(code_constraint, result.keys())
-        self.assertTrue(any(
-            implies(rf, type_constraint, ICMP_GRAMMAR) and
-            implies(type_constraint, rf, ICMP_GRAMMAR) for rf in result.keys()))
+        # self.assertTrue(any(
+        #     implies(rf, type_constraint, ICMP_GRAMMAR) and
+        #     implies(type_constraint, rf, ICMP_GRAMMAR) for rf in result.keys()))
 
     def test_ip_icmp_ping_request(self):
         import scapy.all as scapy
@@ -1094,7 +1106,6 @@ forall <ip_message> container in start:
             generate_new_learning_samples=False,
             # do_generate_more_inputs=False,
             # reduce_inputs_for_learning=True,
-            # perform_static_implication_check=True,
             exclude_nonterminals={
                 "<WS>", "<WSS>", "<MWSS>",
                 "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
@@ -1449,7 +1460,7 @@ forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
             RACKET_BSL_GRAMMAR,
         )._instantiate_string_placeholders(
             {parse_abstract_isla(property, RACKET_BSL_GRAMMAR)},
-            [tree.trie()])
+            [tree.trie().trie])
 
         print(len(instantiations))
         print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), instantiations)))
@@ -1485,13 +1496,13 @@ forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
             RACKET_BSL_GRAMMAR,
         )._instantiate_string_placeholders(
             {parse_abstract_isla(property, RACKET_BSL_GRAMMAR)},
-            [tree.trie()])
+            [tree.trie().trie])
 
         print(len(instantiations))
         print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), instantiations)))
 
         self.assertTrue(any(
-            equivalent(parse_abstract_isla(expected, RACKET_BSL_GRAMMAR), inst)
+            equivalent(parse_abstract_isla(expected, RACKET_BSL_GRAMMAR), inst, RACKET_BSL_GRAMMAR)
             for inst in instantiations))
 
     def test_simplified_racket_xml_defuse_prop_get_candidates(self):
@@ -1640,7 +1651,7 @@ forall <expr> use_ctx="<maybe_comments><MWSS>(<MWSS>{<name> use}<wss_exprs><MWSS
         print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
 
         self.assertTrue(any(
-            equivalent(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), inst)
+            equivalent(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), inst, RACKET_BSL_GRAMMAR)
             for inst in candidates))
 
     def test_racket_defuse_property_get_candidates(self):
@@ -1740,7 +1751,7 @@ forall <expr> attribute="<maybe_comments><MWSS>{<name> prefix_use}" in start:
         print("\n".join(map(lambda candidate: ISLaUnparser(candidate).unparse(), candidates)))
 
         self.assertTrue(any(
-            equivalent(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), inst)
+            equivalent(parse_abstract_isla(expected_defuse_property, RACKET_BSL_GRAMMAR), inst, RACKET_BSL_GRAMMAR)
             for inst in candidates))
 
     def test_load_patterns_from_file(self):

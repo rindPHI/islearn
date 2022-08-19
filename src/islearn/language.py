@@ -417,3 +417,7 @@ class AbstractISLaUnparser(ISLaUnparser):
                 result = result.replace(variable.name, str(variable))
 
         return [result]
+
+
+def unparse_abstract_isla(formula: Formula, indent="  "):
+    return AbstractISLaUnparser(formula, indent).unparse()

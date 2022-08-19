@@ -16,13 +16,14 @@ import toml
 import z3
 from grammar_graph import gg
 from isla import language, isla_predicates
-from isla.evaluator import evaluate, matches_for_quantified_formula, implies
+from isla.evaluator import evaluate, matches_for_quantified_formula
 from isla.helpers import RE_NONTERMINAL, weighted_geometric_mean, \
-    is_nonterminal, dict_of_lists_to_list_of_dicts, get_subtrie, path_to_trie_key, canonical
+    is_nonterminal, dict_of_lists_to_list_of_dicts, canonical
 from isla.isla_predicates import reachable
 from isla.language import set_smt_auto_eval, ensure_unique_bound_variables
 from isla.solver import ISLaSolver
 from isla.three_valued_truth import ThreeValuedTruth
+from isla.trie import path_to_trie_key
 from isla.type_defs import Grammar, ParseTree, Path
 from isla.z3_helpers import z3_subst, evaluate_z3_expression, is_valid, \
     DomainError
@@ -36,7 +37,7 @@ from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable
     StringPlaceholderVariableTypes
 from islearn.mutation import MutationFuzzer
 from islearn.parse_tree_utils import replace_path, expand_tree, tree_leaves, \
-    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, tree_from_paths, Tree
+    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, tree_from_paths, Tree, get_subtrie
 from islearn.reducer import InputReducer
 
 STANDARD_PATTERNS_REPO = "patterns.toml"
@@ -243,7 +244,6 @@ class InvariantLearner:
             max_conjunction_size: int = 2,
             exclude_nonterminals: Optional[Iterable[str]] = None,
             include_negations_in_disjunctions: bool = False,
-            perform_static_implication_check: bool = False,
             reduce_inputs_for_learning: bool = True,
             reduce_all_inputs: bool = False,
             generate_new_learning_samples: bool = True,
@@ -273,7 +273,6 @@ class InvariantLearner:
         self.max_disjunction_size = max_disjunction_size
         self.max_conjunction_size = max_conjunction_size
         self.exclude_nonterminals = exclude_nonterminals or set([])
-        self.perform_static_implication_check = perform_static_implication_check
         self.include_negations_in_disjunctions = include_negations_in_disjunctions
         self.reduce_inputs_for_learning = reduce_inputs_for_learning
         self.reduce_all_inputs = reduce_all_inputs
@@ -428,46 +427,6 @@ class InvariantLearner:
             int(self.min_recall * 100))
 
         logger.debug("Invariants:\n%s", "\n\n".join(map(lambda f: language.ISLaUnparser(f).unparse(), invariants)))
-
-        if self.perform_static_implication_check:
-            # We eliminate rows in recall_truth_table whose formula is implied by that of
-            # another row with the same (higher should be impossible...) recall.
-            def check_is_implied(row: TruthTableRow) -> Optional[TruthTableRow]:
-                if any(implies(other_row.formula, row.formula, self.canonical_grammar)
-                       for other_row in recall_truth_table
-                       if (row != other_row and
-                           other_row.eval_result() >= row.eval_result() > 0)):
-                    return row
-
-                return None
-
-            with pmp.ProcessingPool(processes=pmp.cpu_count()) as pool:
-                for row_to_remove in pool.uimap(check_is_implied, list(recall_truth_table)):
-                    row_to_remove: TruthTableRow
-                    if row_to_remove is not None:
-                        recall_truth_table.remove(row_to_remove)
-                        if precision_truth_table is not None:
-                            precision_truth_table.remove(precision_truth_table[row_to_remove.formula])
-
-            # invariants = {
-            #     invariant_1
-            #     for idx_1, invariant_1 in enumerate(invariants)
-            #     if not any(
-            #         implies(invariant_2, invariant_1, self.canonical_grammar)
-            #         for idx_2, invariant_2 in enumerate(invariants)
-            #         if idx_1 != idx_2
-            #     )
-            # }
-
-            invariants = {
-                row.formula for row in recall_truth_table
-                if row.eval_result() >= self.min_recall
-            }
-
-            logger.info(
-                "%d invariant candidates with recall >= %d%% remain after implication check.",
-                len(invariants),
-                int(self.min_recall * 100))
 
         if self.max_disjunction_size > 1:
             logger.info("Calculating recall of Boolean combinations.")
@@ -635,7 +594,7 @@ class InvariantLearner:
             else pattern
             for pattern in patterns]
 
-        tries: List[datrie.Trie] = [inp.trie() for inp in inputs]
+        tries: List[datrie.Trie] = [inp.trie().trie for inp in inputs]
 
         result: Set[language.Formula] = set([])
 
@@ -1675,7 +1634,7 @@ def approximately_evaluate_abst_for(
             new_assignments = [
                 {var: (in_path + path, tree) for var, (path, tree) in new_assignment.items()}
                 for new_assignment in matches_for_quantified_formula(
-                    formula, grammar, in_inst, {}, trie=get_subtrie(trie, in_path))]
+                    formula, grammar, in_inst, {})]
 
         if not new_assignments:
             return ThreeValuedTruth.false()

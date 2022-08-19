@@ -6,13 +6,13 @@ from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import parse_isla
+from isla.parser import PEGParser
 from pythonping import icmp
 
 from islearn.islearn_predicates import compute_internet_checksum, internet_checksum, INTERNET_CHECKSUM_PREDICATE, \
     bytes_to_hex, \
     hex_to_bytes, hex_to_dec, hex_to_int
 from islearn.learner import approximately_evaluate_abst_for
-from islearn.parser import PEGParser
 from islearn_example_languages import ICMP_GRAMMAR
 
 
@@ -98,7 +98,7 @@ forall <start> container in start:
                 ICMP_GRAMMAR,
                 gg.GrammarGraph.from_grammar(ICMP_GRAMMAR),
                 {language.Constant("start", "<start>"): ((), wrong_ping_request_message)},
-                wrong_ping_request_message.trie()).is_true())
+                wrong_ping_request_message.trie().trie).is_true())
 
     def test_checksum_random_ping_packet(self):
         checksum_constraint = parse_isla("""

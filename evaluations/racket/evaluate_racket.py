@@ -12,11 +12,11 @@ from grammar_graph import gg
 from isla import language
 from isla.evaluator import evaluate
 from isla.language import DerivationTree, ISLaUnparser
+from isla.parser import PEGParser
 
 from islearn.helpers import tree_in
 from islearn.learner import InvariantLearner
 from islearn.mutation import MutationFuzzer
-from islearn.parser import PEGParser
 from islearn_example_languages import load_racket, RACKET_BSL_GRAMMAR
 
 logging.basicConfig(level=logging.DEBUG)
