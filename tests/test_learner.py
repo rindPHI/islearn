@@ -705,16 +705,16 @@ forall <key_value> container="{<key> key} = {<value> value}" in start:
         (str.to_re "-"))
       ((_ re.loop 2 2) (re.range "0" "9")))))'''
 
-        expected_constraint_2 = '''
+        expected_constraint_2 = r'''
 forall <key_value> container="{<key> key} = {<value> value}" in start:
   ((not (= key "name")) or
   (str.in_re 
     value 
     (re.++ 
       (re.++ 
-        (str.to_re """")
-        (re.* (re.comp (re.union (str.to_re "\\n") (str.to_re """"))))) 
-      (str.to_re """"))))'''
+        (str.to_re "\"")
+        (re.* (re.comp (re.union (str.to_re "\n") (str.to_re "\""))))) 
+      (str.to_re "\""))))'''
 
         expected_constraint_3 = '''
 forall <key_value> container="{<key> key} = {<value> value}" in start:
@@ -1019,6 +1019,7 @@ forall <ip_message> container in start:
         self.assertIn(icmp_code_constraint, result.keys())
         self.assertIn(length_constraint, result.keys())
 
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_graphviz(self):
         urls = [
             "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",

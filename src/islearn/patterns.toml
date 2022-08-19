@@ -125,7 +125,6 @@ forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
 [[Types]]
 
 name = "Value Type is String (TOML)"
-# '"' [^\n"]* '"'
 constraint = '''
 forall <?NONTERMINAL> container="{<?MATCHEXPR(key, value)>}" in start:
   ((= key <?STRING>) implies

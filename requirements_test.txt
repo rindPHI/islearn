@@ -1,7 +1,7 @@
 antlr4-python3-runtime>=4.10
 datrie>=0.8.2
 grammar_graph>=0.1.0
-isla-solver>=0.9.4
+isla-solver>=0.9.5
 pathos>=0.2.9
 pytest-cov>=3.0.0
 pytest-forked>=1.3.0
