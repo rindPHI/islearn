@@ -1,8 +1,5 @@
 .idea/
 venv/
-islearn/__pycache__/
-islearn/tests/__pycache__/
-islearn/tests/subject_languages/__pycache__/
 dist/
 src/islearn.egg-info/
 .eggs/
@@ -13,3 +10,6 @@ tests/__pycache__/
 .local/
 src/islearn/__pycache__/
 src/islearn/isla_language/__pycache__/
+evaluations/dot/inputs/
+evaluations/icmp/inputs/
+evaluations/racket/inputs/

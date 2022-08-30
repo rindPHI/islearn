@@ -39,9 +39,12 @@ urls = [
     for i in range(1, 35) if i not in {3, 4, 9, 10, 32, 33}  # Goes to 128
 ]
 
+print('Loading seed inputs...')
+
 positive_trees = []
 
 for url in urls:
+    print(f'Processing {url}')
     file_name = url.split("/")[-1]
     tree_file = f"{dirname}/inputs/{file_name}.tree"
 
@@ -57,6 +60,11 @@ for url in urls:
 
     with urllib.request.urlopen(url) as f:
         racket_code = f.read().decode('utf-8')
+
+        if "GRacket" in racket_code:
+            print(f'Skipping file {url} in GRacket format.')
+            continue
+
         racket_code = racket_code.replace("\\n", "\n")
         racket_code = racket_code.replace("\r\n", "\n").strip()
         # We remove comments, since they sometimes lead to syntactically invalid inputs produced
@@ -95,6 +103,8 @@ target_number_negative_inputs = 30  # 70
 
 new_positive_trees = []
 negative_trees = []
+
+print('Fuzzing additional learning inputs...')
 
 # We run two mutation fuzzers and a grammar fuzzer in parallel
 mutation_fuzzer: MutationFuzzer = MutationFuzzer(RACKET_BSL_GRAMMAR, positive_trees, prop, k=3)
@@ -175,6 +185,8 @@ negative_learning_inputs = negative_trees[:20]
 
 positive_validation_inputs = positive_trees[len(positive_trees) // 2:] + new_positive_trees
 negative_validation_inputs = negative_trees[20:]
+
+print('Learning invariants...')
 
 # Learn invariants
 result = InvariantLearner(
