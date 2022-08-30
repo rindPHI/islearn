@@ -1,5 +1,7 @@
 # ISLearn
 
+[![DOI](https://zenodo.org/badge/470651633.svg)](https://zenodo.org/badge/latestdoi/470651633)
+
 ISLearn is a system for learning ISLa constraints from a set of patterns.
 Patterns are instantiated according to sample inputs (that can also automatically
 be generated based on a given program property), filtered, and combined to
