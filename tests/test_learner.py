@@ -1021,32 +1021,32 @@ forall <ip_message> container in start:
 
     @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_graphviz(self):
-        urls = [
-            "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
-            "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
-            # Below one is graph, not digraph
-            "https://raw.githubusercontent.com/nathanaelle/wireguard-topology/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
-        ]
-
-        positive_trees = []
-        for url in urls:
-            with urllib.request.urlopen(url) as f:
-                dot_code = (re.sub(r"(^|\n)\s*//.*?(\n|$)", "", f.read().decode('utf-8'))
-                            .replace("\\n", "\n")
-                            .replace("\r\n", "\n")
-                            .strip())
-            positive_trees.append(
-                language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
-
-        # positive_inputs = [
-        #     "digraph { a -> b }",
-        #     "graph gg { c -- x }",
-        #     "graph { a; y; a -- y }",
-        #     "digraph { a; b; c; d; c -> d; a -> c; }",
+        # urls = [
+        #     "https://raw.githubusercontent.com/ecliptik/qmk_firmware-germ/56ea98a6e5451e102d943a539a6920eb9cba1919/users/dennytom/chording_engine/state_machine.dot",
+        #     "https://raw.githubusercontent.com/Ranjith32/linux-socfpga/30f69d2abfa285ad9138d24d55b82bf4838f56c7/Documentation/blockdev/drbd/disk-states-8.dot",
+        #     # Below one is graph, not digraph
+        #     "https://raw.githubusercontent.com/nathanaelle/wireguard-topology/f0e42d240624ca0aa801d890c1a4d03d5901dbab/examples/3-networks/topology.dot"
         # ]
-        # positive_trees = [
-        #     language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
-        #     for inp in positive_inputs]
+        #
+        # positive_trees = []
+        # for url in urls:
+        #     with urllib.request.urlopen(url) as f:
+        #         dot_code = (re.sub(r"(^|\n)\s*//.*?(\n|$)", "", f.read().decode('utf-8'))
+        #                     .replace("\\n", "\n")
+        #                     .replace("\r\n", "\n")
+        #                     .strip())
+        #     positive_trees.append(
+        #         language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(dot_code))[0]))
+
+        positive_inputs = [
+            "digraph { a -> b }",
+            "graph gg { c -- x }",
+            "graph { a; y; a -- y }",
+            "digraph { a; b; c; d; c -> d; a -> c; }",
+        ]
+        positive_trees = [
+            language.DerivationTree.from_parse_tree(list(PEGParser(DOT_GRAMMAR).parse(inp))[0])
+            for inp in positive_inputs]
 
         negative_inputs = [
             "digraph { a -- b }",
@@ -1063,7 +1063,7 @@ forall <ip_message> container in start:
         # candidates = InvariantLearner(
         #     DOT_GRAMMAR,
         #     None,
-        #     positive_examples=trees,
+        #     positive_examples=positive_trees,
         #     exclude_nonterminals={
         #         "<WS>", "<WSS>", "<MWSS>",
         #         "<esc_or_no_string_endings>", "<esc_or_no_string_ending>", "<no_string_ending>", "<LETTER_OR_DIGITS>",
@@ -1071,7 +1071,7 @@ forall <ip_message> container in start:
         #     }
         # ).generate_candidates(
         #     repo["String Existence"],
-        #     trees
+        #     positive_trees
         # )
         #
         # print(len(candidates))
