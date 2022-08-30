@@ -19,6 +19,7 @@ RUN pip install --upgrade pip wheel
 
 RUN git clone https://github.com/rindPHI/islearn.git
 WORKDIR /home/islearn/islearn
+RUN git pull
 RUN git checkout v0.2.12
 RUN pip install -e .[dev,test]
 RUN pip install isla-solver==0.10.5

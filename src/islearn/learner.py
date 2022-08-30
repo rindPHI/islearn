@@ -54,6 +54,9 @@ class TruthTableRow:
         self.inputs = list(inputs)
         self.eval_results: List[bool] = list(eval_results)
 
+    def __copy__(self):
+        return TruthTableRow(self.formula, self.inputs, self.eval_results)
+
     def evaluate(
             self,
             graph: gg.GrammarGraph,
@@ -152,6 +155,9 @@ class TruthTable:
             if row_hash not in self.__row_hashes:
                 self.__row_hashes.add(row_hash)
                 self.__rows.append(row)
+
+    def __deepcopy__(self, memodict=None):
+        return TruthTable([copy.copy(row) for row in self.__rows])
 
     def __repr__(self):
         return f"TruthTable({repr(self.__rows)})"
