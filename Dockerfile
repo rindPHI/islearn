@@ -20,9 +20,9 @@ RUN pip install --upgrade pip wheel
 RUN git clone https://github.com/rindPHI/islearn.git
 WORKDIR /home/islearn/islearn
 RUN git pull
-RUN git checkout v0.2.12
+RUN git checkout v0.2.13
 RUN pip install -e .[dev,test]
-RUN pip install isla-solver==0.10.5
+RUN pip install isla-solver==0.10.6
 
 WORKDIR /home/islearn
 CMD ["fish"]
