@@ -5,6 +5,7 @@ import unittest
 import urllib.request
 from urllib.error import URLError
 
+import pytest
 import scapy.all as scapy
 from isla import language
 from isla.helpers import grammar_to_immutable
@@ -54,7 +55,7 @@ class TestGrammars(unittest.TestCase):
 
         icmp_obj = icmp.ICMP(
             icmp.Types.EchoRequest, payload=random_text, identifier=random.randint(0, 0xFFFF),
-            sequence_number=random.randint(0, 0xFFFF))
+            sequence_number=random.randint(-0x7FFF - 1, 0x7FFF))
         icmp_packet = icmp_obj.packet
         self.assertTrue(icmp_obj.is_valid)
         packet_bytes = list(bytearray(icmp_packet))
