@@ -286,6 +286,7 @@ exists int num:
 
         self.assertIn(correct_property.strip(), list(map(lambda f: ISLaUnparser(f).unparse(), candidates)))
 
+    @pytest.mark.flaky(reruns=3, reruns_delay=2)
     def test_learn_invariants_simple_csv_colno(self):
         correct_property = """
 exists int num:
