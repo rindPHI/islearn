@@ -1,4 +1,4 @@
-# Generated from MexprParser.g4 by ANTLR 4.10.1
+# Generated from MexprParser.g4 by ANTLR 4.11.1
 # encoding: utf-8
 from antlr4 import *
 from io import StringIO
@@ -71,7 +71,7 @@ class MexprParser ( Parser ):
 
     def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
         super().__init__(input, output)
-        self.checkVersion("4.10.1")
+        self.checkVersion("4.11.1")
         self._interp = ParserATNSimulator(self, self.atn, self.decisionsToDFA, self.sharedContextCache)
         self._predicates = None
 
@@ -122,7 +122,7 @@ class MexprParser ( Parser ):
                 self.state = 11 
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                if not ((((_la) & ~0x3f) == 0 and ((1 << _la) & ((1 << MexprParser.BRAOP) | (1 << MexprParser.OPTOP) | (1 << MexprParser.TEXT))) != 0)):
+                if not (((_la) & ~0x3f) == 0 and ((1 << _la) & 14) != 0):
                     break
 
         except RecognitionException as re:
@@ -286,7 +286,7 @@ class MexprParser ( Parser ):
                 self.state = 25
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                while _la==MexprParser.COMMA:
+                while _la==8:
                     self.state = 21
                     self.match(MexprParser.COMMA)
                     self.state = 22
@@ -365,14 +365,14 @@ class MexprParser ( Parser ):
             self.state = 41
             self._errHandler.sync(self)
             token = self._input.LA(1)
-            if token in [MexprParser.LT]:
+            if token in [11]:
                 self.enterOuterAlt(localctx, 1)
                 self.state = 37
                 self.varType()
                 self.state = 38
                 self.match(MexprParser.ID)
                 pass
-            elif token in [MexprParser.ID]:
+            elif token in [9]:
                 self.enterOuterAlt(localctx, 2)
                 self.state = 40
                 self.match(MexprParser.ID)

@@ -32,12 +32,15 @@ from pathos import multiprocessing as pmp
 from islearn.helpers import connected_chains, transitive_closure, tree_in, \
     is_int, is_float, e_assert
 from islearn.language import NonterminalPlaceholderVariable, PlaceholderVariable, \
-    NonterminalStringPlaceholderVariable, parse_abstract_isla, StringPlaceholderVariable, \
-    AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression, DisjunctiveStringsPlaceholderVariable, \
+    NonterminalStringPlaceholderVariable, parse_abstract_isla, \
+    StringPlaceholderVariable, \
+    AbstractISLaUnparser, MexprPlaceholderVariable, AbstractBindExpression, \
+    DisjunctiveStringsPlaceholderVariable, \
     StringPlaceholderVariableTypes
 from islearn.mutation import MutationFuzzer
 from islearn.parse_tree_utils import replace_path, expand_tree, tree_leaves, \
-    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, tree_from_paths, Tree, get_subtrie
+    get_subtree, tree_paths, trie_from_parse_tree, next_trie_key, tree_from_paths, Tree, \
+    get_subtrie
 from islearn.reducer import InputReducer
 
 STANDARD_PATTERNS_REPO = "patterns.toml"
@@ -846,8 +849,8 @@ class InvariantLearner:
             num_tries: int = 100) -> Set[language.DerivationTree]:
         result: Set[language.DerivationTree] = set()
 
-        solvers = {
-            formula: ISLaSolver(self.grammar, formula, enforce_unique_trees_in_queue=False).solve()
+        solvers: Dict[language.Formula, ISLaSolver] = {
+            formula: ISLaSolver(self.grammar, formula, enforce_unique_trees_in_queue=False)
             for formula in formulas}
 
         i = 0
@@ -860,7 +863,7 @@ class InvariantLearner:
             #     })
             for formula in formulas:
                 for _ in range(desired_number_counter_examples):
-                    inp = next(solvers[formula])
+                    inp = solvers[formula].solve()
                     if not self.prop(inp):
                         result.add(inp)
 
