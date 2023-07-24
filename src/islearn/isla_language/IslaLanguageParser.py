@@ -1,4 +1,4 @@
-# Generated from IslaLanguage.g4 by ANTLR 4.11.1
+# Generated from IslaLanguage.g4 by ANTLR 4.13.0
 # encoding: utf-8
 from antlr4 import *
 from io import StringIO
@@ -178,7 +178,7 @@ class IslaLanguageParser ( Parser ):
 
     def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
         super().__init__(input, output)
-        self.checkVersion("4.11.1")
+        self.checkVersion("4.13.0")
         self._interp = ParserATNSimulator(self, self.atn, self.decisionsToDFA, self.sharedContextCache)
         self._predicates = None
 
@@ -1577,7 +1577,7 @@ class IslaLanguageParser ( Parser ):
                 self.state = 157
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                if ((_la) & ~0x3f) == 0 and ((1 << _la) & 69835093304448) != 0:
+                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 69835093304448) != 0):
                     self.state = 149
                     self.sexpr(0)
                     self.state = 154
@@ -1639,7 +1639,7 @@ class IslaLanguageParser ( Parser ):
                     self.state = 168 
                     self._errHandler.sync(self)
                     _la = self._input.LA(1)
-                    if not (((_la) & ~0x3f) == 0 and ((1 << _la) & 69835093304448) != 0):
+                    if not ((((_la) & ~0x3f) == 0 and ((1 << _la) & 69835093304448) != 0)):
                         break
 
                 self.state = 170
@@ -1701,7 +1701,7 @@ class IslaLanguageParser ( Parser ):
                         self.state = 181
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
-                        if not(((_la) & ~0x3f) == 0 and ((1 << _la) & 550561120256) != 0):
+                        if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 550561120256) != 0)):
                             localctx.op = self._errHandler.recoverInline(self)
                         else:
                             self._errHandler.reportMatch(self)
@@ -1720,7 +1720,7 @@ class IslaLanguageParser ( Parser ):
                         self.state = 184
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
-                        if not(((_la) & ~0x3f) == 0 and ((1 << _la) & 65970697666688) != 0):
+                        if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 65970697666688) != 0)):
                             localctx.op = self._errHandler.recoverInline(self)
                         else:
                             self._errHandler.reportMatch(self)
@@ -1797,7 +1797,7 @@ class IslaLanguageParser ( Parser ):
             self.enterOuterAlt(localctx, 1)
             self.state = 191
             _la = self._input.LA(1)
-            if not(((_la) & ~0x3f) == 0 and ((1 << _la) & 15292432384) != 0):
+            if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 15292432384) != 0)):
                 self._errHandler.recoverInline(self)
             else:
                 self._errHandler.reportMatch(self)
@@ -1883,7 +1883,7 @@ class IslaLanguageParser ( Parser ):
             self.enterOuterAlt(localctx, 1)
             self.state = 193
             _la = self._input.LA(1)
-            if not(((_la) & ~0x3f) == 0 and ((1 << _la) & 69819796652160) != 0):
+            if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 69819796652160) != 0)):
                 self._errHandler.recoverInline(self)
             else:
                 self._errHandler.reportMatch(self)
