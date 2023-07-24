@@ -1,4 +1,4 @@
-# Generated from MexprParser.g4 by ANTLR 4.11.1
+# Generated from MexprParser.g4 by ANTLR 4.13.0
 # encoding: utf-8
 from antlr4 import *
 from io import StringIO
@@ -71,7 +71,7 @@ class MexprParser ( Parser ):
 
     def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
         super().__init__(input, output)
-        self.checkVersion("4.11.1")
+        self.checkVersion("4.13.0")
         self._interp = ParserATNSimulator(self, self.atn, self.decisionsToDFA, self.sharedContextCache)
         self._predicates = None
 
@@ -122,7 +122,7 @@ class MexprParser ( Parser ):
                 self.state = 11 
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                if not (((_la) & ~0x3f) == 0 and ((1 << _la) & 14) != 0):
+                if not ((((_la) & ~0x3f) == 0 and ((1 << _la) & 14) != 0)):
                     break
 
         except RecognitionException as re:
