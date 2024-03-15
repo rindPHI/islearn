@@ -10,6 +10,7 @@ from abc import ABC
 from functools import lru_cache
 from typing import List, Tuple, Set, Dict, Optional, cast, Callable, Iterable, Sequence
 
+from returns.result import Success, Failure
 import datrie
 import isla.fuzzer
 import toml
@@ -1521,7 +1522,11 @@ def approximately_evaluate_abst_for(
             return ThreeValuedTruth.unknown()
 
         try:
-            translation = evaluate_z3_expression(formula.formula)
+            match evaluate_z3_expression(formula.formula):
+                case Success(value): translation = value
+                case Failure(error): raise error(error[0])
+
+            # translation = evaluate_z3_expression(formula.formula)
             var_map: Dict[str, language.Variable] = {
                 var.name: var
                 for var in formula.free_variables()
