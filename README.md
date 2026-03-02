@@ -1,5 +1,7 @@
 # ISLearn
 
+**Currently, ISLearn does not have a maintainer. If you experience a bug, it'll only get fixed if you submit a pull request. If you want to adopt ISLearn and become a maintainer, that would be really awesome! Thank you for your understanding. —Dominic**
+
 [![DOI](https://zenodo.org/badge/470651633.svg)](https://zenodo.org/badge/latestdoi/470651633)
 
 ISLearn is a system for learning ISLa constraints from a set of patterns.
